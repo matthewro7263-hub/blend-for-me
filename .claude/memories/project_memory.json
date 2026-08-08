@@ -1,0 +1,14 @@
+{
+  "memories": [],
+  "manual_memories": [],
+  "realtime_memories": [
+    {
+      "type": "message",
+      "content": "Build `blender-agent-mcp` — a Blender extension + MCP server giving AI agents deep control of Blender on macOS You are building a production-quality, two-part system in a single repo: 1. `blender_exte",
+      "added_at": "2026-08-07T20:15:07.596869",
+      "source": "realtime_capture"
+    }
+  ],
+  "created_at": "2026-08-07T20:15:07.596504",
+  "updated_at": "2026-08-07T20:15:07.596871"
+}

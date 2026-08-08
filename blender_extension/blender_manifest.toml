@@ -1,0 +1,33 @@
+schema_version = "1.0.0"
+
+id = "blender_agent_mcp"
+version = "0.1.0"
+name = "Agent MCP Bridge"
+tagline = "Local TCP bridge that lets AI agents drive Blender over MCP"
+maintainer = "blender-agent-mcp contributors <noreply@example.com>"
+type = "add-on"
+
+website = "https://github.com/your-org/blender-agent-mcp"
+
+tags = ["Development", "Pipeline"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+# Reasons are shown to the user at install time. Blender enforces a hard limit of
+# 64 characters per reason, and the convention is one short sentence, no period.
+[permissions]
+network = "Runs a loopback TCP bridge for the local MCP server"
+files = "Imports and exports models, textures and blend files"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git/",
+  "/*.zip",
+  ".DS_Store",
+  "/tests/",
+]
