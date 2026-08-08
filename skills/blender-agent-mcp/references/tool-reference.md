@@ -87,7 +87,7 @@ groups: remesh first, then unwrap, then weight. Triangulate and decimate last.
 
 Introspect a live `bpy.ops.*` operator or `bpy.types.*` type via RNA.
 
-**vs:** vs `search_blender_manual` / `search_python_api` — describe_api answers "what are this operator's parameters"; the docs tools answer "how does this feature work". Reaching for the wrong one wastes a round trip.
+**vs:** `search_blender_manual` / `search_python_api` — describe_api answers "what are this operator's parameters"; the docs tools answer "how does this feature work". Reaching for the wrong one wastes a round trip.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -108,7 +108,7 @@ describe_api(path="bpy.ops.mesh.bevel")
 
 Run arbitrary Python inside Blender. The escape hatch — prefer a real tool.
 
-**vs:** vs any dedicated tool — dedicated tools push undo, validate arguments and return structured results. Reach for this only for genuinely novel operations, and say why.
+**vs:** any dedicated tool — dedicated tools push undo, validate arguments and return structured results. Reach for this only for genuinely novel operations, and say why.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -134,6 +134,11 @@ Blender / Python versions, build info and bridge statistics.
 No parameters.
 
 Returns: `{blender_version, blender_version_string, build_branch, python_version, background, online_access, has_view3d, bridge_port, stats}`.
+
+Gotchas:
+
+- `has_view3d` is the field that decides whether a sculpting session is even possible. Read it before planning one.
+- `background: true` means Blender was launched with `--background` and every GUI-only tool will refuse.
 
 ```python
 get_blender_version()
@@ -201,6 +206,10 @@ No parameters.
 
 Returns: `{commands, count}`; each command carries `mutates` and `needs_gui`.
 
+Gotchas:
+
+- Use this to spot a version mismatch between this MCP server and the installed Blender extension: a tool that exists here but not there fails with an unhelpful "unknown command".
+
 ```python
 list_bridge_commands()
 ```
@@ -216,6 +225,10 @@ List scene objects, optionally of one type.
 
 Returns: `{count, objects, truncated}`.
 
+Gotchas:
+
+- `limit` caps the list; `count` is always exact. Filter by `type_filter` rather than pulling 500 objects and sorting them yourself.
+
 ```python
 list_objects(type_filter="MESH", limit=100)
 ```
@@ -228,6 +241,10 @@ No parameters.
 
 Returns: `{connected, host, port}` from the fresh TCP connection.
 
+Gotchas:
+
+- Ordinary calls already reconnect once transparently. Reach for this only after restarting Blender or the bridge from the N-panel.
+
 ```python
 reconnect()
 ```
@@ -239,6 +256,10 @@ Step one undo level forward.
 No parameters.
 
 Returns: `{redone, mode}`.
+
+Gotchas:
+
+- Only steps forward through undo levels that `undo` created. Any new mutation discards the redo stack.
 
 ```python
 redo()
@@ -293,6 +314,11 @@ No parameters.
 
 Returns: `{undone, mode}`.
 
+Gotchas:
+
+- Every mutating tool pushes its own undo step, so one call steps back exactly one tool call — unless the user touched the viewport in between.
+- Undo does not restore the mode you were in; check `mode` in the result.
+
 ```python
 undo()
 ```
@@ -317,17 +343,18 @@ undo_checkpoint(label="before limb blockout")
 
 ### viewport_screenshot
 
-See the 3D viewport. Returns an image you can actually look at. GUI Blender only.
+See the 3D viewport. Returns an image you can actually look at.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
-**vs:** vs `render_frame` — screenshot for every iteration (fast, ~1 s); render_frame only for a final look.
+**vs:** `render_frame` — screenshot for every iteration (fast, ~1 s); render_frame only for a final look.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `shading_mode` | string | `WIREFRAME`, `SOLID`, `MATERIAL`, `RENDERED` — for this shot only | none | no |
 | `camera_view` | boolean | render through the scene camera instead of the current view | `false` | no |
-| `max_size` | integer | longest image edge, pixels | `1024` | no |
+| `max_size` | integer | longest image edge in pixels — 1024 is plenty; larger costs context | `1024` | no |
 
 Returns: A PNG image content block you can actually look at, not a dict.
 
@@ -358,8 +385,8 @@ Create a camera, by default making it the scene's render camera.
 | `type` | string | `PERSP`, `ORTHO`, `PANO`, `CUSTOM` | `PERSP` | no |
 | `clip_start` | number | near clip, world units | none | no |
 | `clip_end` | number | far clip, world units | none | no |
-| `make_active` | boolean | flag | `true` | no |
-| `name` | string | name | none | no |
+| `make_active` | boolean | set `scene.camera` so renders use this camera | `true` | no |
+| `name` | string | object name | none | no |
 | `collection` | string | collection name | none | no |
 
 Returns: `{name, type, location, rotation_euler, scale, dimensions, collections}` plus camera data.
@@ -383,7 +410,7 @@ Create an Empty — a transform with no geometry, for rigging and pivots.
 | `size` | number | viewport display size, world units — cosmetic, does not scale children | `1.0` | no |
 | `location` | array | `[x, y, z]` world units | none | no |
 | `rotation` | array | `[rx, ry, rz]` RADIANS | none | no |
-| `name` | string | name | none | no |
+| `name` | string | object name | none | no |
 | `collection` | string | collection name | none | no |
 
 Returns: `{name, type, location, rotation_euler, scale, dimensions, collections}`.
@@ -412,8 +439,8 @@ Create a light. Units differ per light type — read the notes below.
 | `shape` | string | AREA light shape | none | no |
 | `size_y` | number | AREA light second edge, world units | none | no |
 | `spot_size` | number | full cone angle, RADIANS | none | no |
-| `spot_blend` | number | number | none | no |
-| `name` | string | name | none | no |
+| `spot_blend` | number | SPOT only, 0-1 edge softness of the cone | none | no |
+| `name` | string | object name | none | no |
 | `collection` | string | collection name | none | no |
 
 Returns: `{name, type, location, …}` plus which softness property `size` was written to.
@@ -439,7 +466,7 @@ Line objects up on one or more axes.
 | `mode` | string | `CENTERS`, `NEGATIVE`, `POSITIVE` | `CENTERS` | no |
 | `relative_to` | string | what the objects align TO | `SELECTION` | no |
 | `active` | string | which object is the anchor / active | none | no |
-| `bb_quality` | boolean | flag | `true` | no |
+| `bb_quality` | boolean | use the accurate (slower) bounding box | `true` | no |
 
 Returns: `{objects, axes, mode, relative_to, active}`.
 
@@ -462,7 +489,7 @@ Bake an object's transform into its mesh, resetting the transform to identity.
 | `location` | boolean | also zero the location (moves the origin to the world origin) | `false` | no |
 | `rotation` | boolean | bake rotation, leaving `rotation_euler` at 0 | `true` | no |
 | `scale` | boolean | bake scale, leaving `scale` at 1,1,1 | `true` | no |
-| `isolate_users` | boolean | flag | `false` | no |
+| `isolate_users` | boolean | give each object its own mesh copy first (breaks instancing, costs memory) | `false` | no |
 
 Returns: `{objects, applied}`.
 
@@ -483,7 +510,7 @@ Create a collection, optionally nested inside an existing one.
 | --- | --- | --- | --- | --- |
 | `name` | string | collection name | — | yes |
 | `parent` | string | existing collection to nest inside | none | no |
-| `allow_duplicate_name` | boolean | flag | `false` | no |
+| `allow_duplicate_name` | boolean | create a suffixed second collection instead of refusing | `false` | no |
 
 Returns: `{name, requested_name, parent, children}`.
 
@@ -503,9 +530,13 @@ Add objects to a collection WITHOUT removing them from their current ones.
 | --- | --- | --- | --- | --- |
 | `names` | array | list of object names | — | yes |
 | `collection` | string | collection name | — | yes |
-| `create` | boolean | flag | `true` | no |
+| `create` | boolean | create the collection at the scene root when missing | `true` | no |
 
 Returns: `{collection, linked, already_linked, membership}`.
+
+Gotchas:
+
+- Adds membership WITHOUT removing existing membership — an object can belong to any number of collections. Use `collection_move` when it should live in exactly one.
 
 ```python
 collection_link(names=["Sword"], collection="Props", create=True)
@@ -538,7 +569,7 @@ Move objects into a collection, unlinking them from every other one.
 | --- | --- | --- | --- | --- |
 | `names` | array | list of object names | — | yes |
 | `collection` | string | collection name | — | yes |
-| `create` | boolean | flag | `true` | no |
+| `create` | boolean | create the collection at the scene root when missing | `true` | no |
 
 Returns: `{collection, moved, was_in, membership}` — `was_in` is your undo list.
 
@@ -565,7 +596,7 @@ Add a mesh primitive to the scene. The normal way to create geometry.
 | `name` | string | object name; may come back suffixed `.001` | none | no |
 | `collection` | string | collection name | none | no |
 | `vertices` | integer | radial segment count | none | no |
-| `segments` | integer | count | none | no |
+| `segments` | integer | longitudinal segments for uv_sphere (default 32) | none | no |
 | `ring_count` | integer | latitudinal rings | none | no |
 | `subdivisions` | integer | ico_sphere subdivision level | none | no |
 | `depth` | number | world units | none | no |
@@ -595,7 +626,7 @@ Delete objects by name. Undoable via `undo`.
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `names` | array | object names; unknown names come back in `missing` rather than raising | — | yes |
-| `purge_orphan_data` | boolean | flag | `false` | no |
+| `purge_orphan_data` | boolean | also delete zero-user mesh/curve/light/camera/armature datablocks | `false` | no |
 
 Returns: `{deleted, missing, purged_datablocks, remaining}`.
 
@@ -615,7 +646,7 @@ Copy one object, with or without copying its mesh data.
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `name` | string | object to copy | — | yes |
-| `linked` | boolean | flag | `false` | no |
+| `linked` | boolean | share the mesh datablock (an instance) instead of copying it | `false` | no |
 | `new_name` | string | name for the copy; may be suffixed | none | no |
 | `location` | array | `[x, y, z]` world units for the copy; omit to leave it on top of the original | none | no |
 | `collection` | string | collection name | none | no |
@@ -637,7 +668,7 @@ Merge several objects into one. Destructive — the others are consumed.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `names` | array | list of object names | — | yes |
+| `names` | array | objects to merge — all must be the same type as the target | — | yes |
 | `target` | string | the survivor, which keeps its name, origin, transform and modifiers | none | no |
 
 Returns: `{name, type, …}` for the surviving target.
@@ -658,7 +689,7 @@ Measure one object: bounding box in local AND world space, centre, size.
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `name` | string | object name | — | yes |
-| `use_evaluated` | boolean | flag | `false` | no |
+| `use_evaluated` | boolean | measure the MODIFIER RESULT instead of the base mesh | `false` | no |
 
 Returns: `{name, type, use_evaluated, local, world, dimensions, location, matrix_world, degenerate}`; `local`/`world` each carry min, max, center, size and the 8 corners.
 
@@ -675,16 +706,16 @@ object_bounds(name="Body", use_evaluated=True)
 
 Parent objects to another object, including all the armature-deform variants.
 
-**vs:** vs `parent_mesh_to_armature` / `auto_weights` — use `parent_objects` for plain object/bone parenting; use the rig tools when you actually want skinning.
+**vs:** `parent_mesh_to_armature` / `auto_weights` — use `parent_objects` for plain object/bone parenting; use the rig tools when you actually want skinning.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `child` | string|array | one object name, or a list of them | — | yes |
 | `parent` | string | parent name (bone / collection / object) | — | yes |
 | `type` | string | `OBJECT`, `ARMATURE`, `ARMATURE_NAME`, `ARMATURE_AUTO`, `ARMATURE_ENVELOPE`, `BONE`, `BONE_RELATIVE`, `CURVE`, `FOLLOW`, `PATH_CONST`, `LATTICE`, `VERTEX`, `VERTEX_TRI` | `OBJECT` | no |
-| `keep_transform` | boolean | flag | `true` | no |
+| `keep_transform` | boolean | preserve the child's WORLD position when parenting | `true` | no |
 | `bone` | string | bone name | none | no |
-| `xmirror` | boolean | flag | `false` | no |
+| `xmirror` | boolean | mirror the generated weights across X for a symmetric character | `false` | no |
 
 Returns: `{parent, type, children}`.
 
@@ -706,7 +737,7 @@ Set the object selection and the active object.
 | --- | --- | --- | --- | --- |
 | `names` | array | list of object names | — | yes |
 | `mode` | string | `SET`, `ADD`, `REMOVE` | `SET` | no |
-| `deselect_others` | boolean | flag | none | no |
+| `deselect_others` | boolean | override the default (true for SET, false for ADD/REMOVE) | none | no |
 | `active` | string | which object is the anchor / active | none | no |
 
 Returns: `{selected, active, mode, deselect_others}`.
@@ -745,8 +776,8 @@ Make one object the active object.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
-| `select` | boolean | flag | `true` | no |
+| `name` | string | object name | — | yes |
+| `select` | boolean | also select it (false leaves an existing selection alone) | `true` | no |
 
 Returns: `{active, type, mode, selected}`.
 
@@ -788,7 +819,7 @@ Move the 3D cursor, which several other operations pivot around.
 | `target` | string | `WORLD_ORIGIN`, `LOCATION`, `OBJECT`, `SELECTED` | `WORLD_ORIGIN` | no |
 | `location` | array | `[x, y, z]` world units | none | no |
 | `object` | string | object name; omit for the active object | none | no |
-| `use_bounds` | boolean | flag | `false` | no |
+| `use_bounds` | boolean | use the bounding-box CENTRE instead of the object ORIGIN | `false` | no |
 
 Returns: `{cursor, target, use_bounds}`.
 
@@ -809,8 +840,8 @@ Drop objects straight down so they rest on a horizontal plane.
 | --- | --- | --- | --- | --- |
 | `names` | array | list of object names | — | yes |
 | `ground_z` | number | world Z of the floor plane | `0.0` | no |
-| `together` | boolean | flag | `false` | no |
-| `use_evaluated` | boolean | flag | `false` | no |
+| `together` | boolean | move the whole set by one shared offset, preserving relative heights | `false` | no |
+| `use_evaluated` | boolean | measure the MODIFIER RESULT instead of the base mesh | `false` | no |
 
 Returns: `{moved, ground_z, together, use_evaluated, objects}`.
 
@@ -829,7 +860,7 @@ Move, rotate or scale an object. The primary way to place things.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | object name | — | yes |
 | `location` | array | `[x, y, z]` world units, in the object's PARENT space | none | no |
 | `rotation` | array | `[rx, ry, rz]` RADIANS | none | no |
 | `scale` | array | `[sx, sy, sz]` multipliers, 1.0 = unchanged | none | no |
@@ -859,21 +890,21 @@ transform_object(name="Head", location=[0, 0, 1.62], rotation=[0, 0, 0.2618], mo
 
 Round off the selected edges (or corners) so they catch light.
 
-**vs:** vs a `BEVEL` modifier via `add_modifier` — the tool bakes geometry now; the modifier stays retunable and reorderable.
+**vs:** a `BEVEL` modifier via `add_modifier` — the tool bakes geometry now; the modifier stays retunable and reorderable.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `name` | string | MESH object name | — | yes |
 | `width` | number | world units, interpreted per `offset_type` | `0.1` | no |
-| `segments` | integer | count | `1` | no |
+| `segments` | integer | cross-section subdivisions — 1 chamfer, 2-4 rounded, >6 rarely pays | `1` | no |
 | `affect` | string | `EDGES` (default) or `VERTICES` | `EDGES` | no |
 | `profile` | number | 0-1; 0.5 = circular arc | `0.5` | no |
 | `offset_type` | string | how `width` is measured | `OFFSET` | no |
-| `clamp_overlap` | boolean | flag | `true` | no |
-| `loop_slide` | boolean | flag | `true` | no |
-| `mark_seam` | boolean | flag | `false` | no |
-| `mark_sharp` | boolean | flag | `false` | no |
-| `harden_normals` | boolean | flag | `false` | no |
+| `clamp_overlap` | boolean | stop the bevel eating past neighbouring geometry — leave on | `true` | no |
+| `loop_slide` | boolean | prefer sliding along existing edge loops | `true` | no |
+| `mark_seam` | boolean | tag the new edges as UV seams | `false` | no |
+| `mark_sharp` | boolean | tag the new edges as sharp | `false` | no |
+| `harden_normals` | boolean | adjust custom normals so flat faces stay flat (smooth-shaded meshes only) | `false` | no |
 | `material` | integer | material slot index for the new faces; -1 inherits from neighbours | `-1` | no |
 | `miter_outer` | string | `SHARP`, `PATCH`, `ARC` | `SHARP` | no |
 | `miter_inner` | string | `SHARP`, `ARC` | `SHARP` | no |
@@ -898,10 +929,10 @@ Connect two open edge loops with a tube of faces.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
-| `use_pairs` | boolean | flag | `false` | no |
-| `use_cyclic` | boolean | flag | `false` | no |
-| `use_merge` | boolean | flag | `false` | no |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
+| `use_pairs` | boolean | bridge loops in matched pairs rather than as one chain | `false` | no |
+| `use_cyclic` | boolean | force the bridge to close into a loop | `false` | no |
+| `use_merge` | boolean | collapse the two loops into one instead of building faces between them | `false` | no |
 | `merge_factor` | number | 0-1 along the span | `0.5` | no |
 | `twist_offset` | integer | vertex-correspondence rotation, in steps | `0` | no |
 
@@ -920,19 +951,19 @@ mesh_bridge_edge_loops(name="Body", use_merge=False, twist_offset=0)
 
 Reduce polygon count in one shot: add a Decimate modifier and apply it.
 
-**vs:** vs `quadriflow_remesh` — decimate is fast and wrecks edge flow; quadriflow is slow and produces topology you can still work with.
+**vs:** `quadriflow_remesh` — decimate is fast and wrecks edge flow; quadriflow is slow and produces topology you can still work with.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `ratio` | number | fraction of faces to KEEP, 0.0-1.0 (not a percentage) | `0.5` | no |
 | `decimate_type` | string | `COLLAPSE`, `UNSUBDIV`, `DISSOLVE` | `COLLAPSE` | no |
-| `use_collapse_triangulate` | boolean | flag | `false` | no |
+| `use_collapse_triangulate` | boolean | keep the triangles COLLAPSE produces | `false` | no |
 | `iterations` | integer | UNSUBDIV only — subdivision levels to undo | none | no |
 | `angle_limit` | number | RADIANS, DISSOLVE only. Default 0.0873 (5°) | none | no |
-| `use_dissolve_boundaries` | boolean | flag | none | no |
-| `vertex_group` | string | vertex group name used as a mask | none | no |
-| `invert_vertex_group` | boolean | flag | `false` | no |
+| `use_dissolve_boundaries` | boolean | also dissolve open boundary edges (can eat silhouette detail) | none | no |
+| `vertex_group` | string | COLLAPSE only — restrict decimation to this group | none | no |
+| `invert_vertex_group` | boolean | decimate everything EXCEPT the group | `false` | no |
 | `vertex_group_factor` | number | 0-1 bias from the vertex group | none | no |
 | `symmetry_axis` | string | `X`, `Y` or `Z` | none | no |
 | `timeout` | number | seconds to wait for the bridge call | `300.0` | no |
@@ -956,7 +987,7 @@ Delete the selected geometry, choosing how much goes with it.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `domain` | string | `VERT`, `EDGE`, `FACE`, `FACE_ONLY`, `EDGE_FACE`, `FACE_KEEP_BOUNDARY` | `VERT` | no |
 
 Returns: `{name, before, after, removed, domain, bmesh_context, deleted_elements}`.
@@ -973,13 +1004,13 @@ mesh_delete_geometry(name="Body", domain="FACE_ONLY")
 
 Loop cut: add edge loops running around the mesh, perpendicular to a seed edge.
 
-**vs:** vs `mesh_subdivide` — use this when you want ONE loop in the right place (a waistline, a bend joint, a subsurf control loop), not general density.
+**vs:** `mesh_subdivide` — use this when you want ONE loop in the right place (a waistline, a bend joint, a subsurf control loop), not general density.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `seed_edges` | array | edge indices to grow rings from | none | no |
-| `cuts` | integer | count | `1` | no |
+| `cuts` | integer | parallel loops to insert — 1 at the midpoint, 2 evenly spaced | `1` | no |
 | `smoothness` | number | 0 keeps the surface put; 1 rounds it outward | `0.0` | no |
 | `smooth_falloff` | string | curve used by `smoothness` | `SMOOTH` | no |
 | `quad_corner_type` | string | how a quad with two adjacent cut edges is resolved | `STRAIGHT_CUT` | no |
@@ -1003,7 +1034,7 @@ Extrude the current selection and push the new geometry out.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `offset` | array | `[x, y, z]` translation in world units, read in `space` | none | no |
 | `normal_offset` | number | world units along each new vertex's own normal | none | no |
 | `space` | string | `OBJECT` or `WORLD` for the coordinates above | `OBJECT` | no |
@@ -1026,7 +1057,7 @@ Cap open boundary loops with new faces.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `sides` | integer | maximum edges a hole may have; 0 = no limit | `0` | no |
 
 Returns: `{name, before, after, created, filled_faces, boundary_edges, sides, used_selection}`; `filled_faces: 0` plus a note when the mesh was already closed.
@@ -1046,7 +1077,7 @@ Reverse face winding unconditionally.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 
 Returns: `{name, faces, used_selection, signed_volume_after}`.
 
@@ -1064,14 +1095,14 @@ Inset the selected faces, creating a border ring around them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `thickness` | number | border width in WORLD UNITS (not a 0-1 fraction) | `0.1` | no |
 | `depth` | number | displacement of the inset faces along their normal, world units | `0.0` | no |
-| `individual` | boolean | flag | `false` | no |
-| `use_boundary` | boolean | flag | none | no |
-| `use_even_offset` | boolean | flag | none | no |
-| `use_relative_offset` | boolean | flag | none | no |
-| `use_outset` | boolean | flag | none | no |
+| `individual` | boolean | inset every face separately (the grid-of-panels look) rather than as one region | `false` | no |
+| `use_boundary` | boolean | inset open mesh boundaries too | none | no |
+| `use_even_offset` | boolean | keep the border an even width around corners | none | no |
+| `use_relative_offset` | boolean | scale `thickness` by each face's size instead of using an absolute distance | none | no |
+| `use_outset` | boolean | grow the border outward instead of inward (ignored when `individual`) | none | no |
 
 Returns: `{name, before, after, created, inset_faces, individual, thickness, depth}`.
 
@@ -1090,9 +1121,9 @@ Weld vertices that sit closer together than a threshold.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `threshold` | number | maximum world-unit distance between vertices that get welded | `0.0001` | no |
-| `use_connected` | boolean | flag | `false` | no |
+| `use_connected` | boolean | only weld vertices that share an edge (slower, safer) | `false` | no |
 
 Returns: `{name, before, after, removed, threshold, considered_vertices, used_selection}`.
 
@@ -1111,7 +1142,7 @@ Move the selected vertices and drag nearby ones along with a soft falloff.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `translate` | array | `[x, y, z]` displacement in world units | none | no |
 | `proportional_size` | number | radius of influence, world units (Euclidean, not topological) | `1.0` | no |
 | `falloff` | string | weight curve | `SMOOTH` | no |
@@ -1133,12 +1164,12 @@ mesh_proportional_transform(name="Terrain", translate=[0, 0, 0.6], proportional_
 
 Make face winding consistent so the surface faces outward.
 
-**vs:** vs `mesh_flip_normals` — recalculate repairs a partly-wrong mesh per shell; flip only helps when the whole surface is uniformly backwards.
+**vs:** `mesh_flip_normals` — recalculate repairs a partly-wrong mesh per shell; flip only helps when the whole surface is uniformly backwards.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
-| `inside` | boolean | flag | `false` | no |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
+| `inside` | boolean | point normals INWARD (skybox / interior geometry) | `false` | no |
 
 Returns: `{name, faces, inside, used_selection, signed_volume_before, signed_volume_after}` — the volume sign flip is the proof it worked.
 
@@ -1169,8 +1200,8 @@ Choose which vertices/edges/faces the next edit will act on.
 | `linked_from` | array | seed element indices; expands to whole connected components | none | no |
 | `random_percent` | number | 0-100 PERCENT (not a 0-1 fraction) | none | no |
 | `random_seed` | integer | RNG seed | `0` | no |
-| `select_all` | boolean | flag | `false` | no |
-| `invert` | boolean | flag | `false` | no |
+| `select_all` | boolean | select every element in `domain` | `false` | no |
+| `invert` | boolean | invert the result, applied last, after `mode` | `false` | no |
 | `space` | string | `OBJECT` or `WORLD` for the coordinates above | `OBJECT` | no |
 | `limit` | integer | cap on the returned list (counts stay exact) | `1000` | no |
 
@@ -1193,10 +1224,10 @@ Smooth-shade only where faces meet at a shallow angle, keeping creases sharp.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `angle` | number | RADIANS — 0.5236 = 30°, 0.7854 = 45°, 1.0472 = 60° | `0.5235987755982988` | no |
-| `keep_sharp_edges` | boolean | flag | `true` | no |
-| `use_modifier` | boolean | flag | `false` | no |
+| `keep_sharp_edges` | boolean | preserve edges already marked sharp | `true` | no |
+| `use_modifier` | boolean | add a retunable "Smooth by Angle" modifier instead of baking `sharp_edge` | `false` | no |
 
 Returns: `{name, angle_radians, angle_degrees, method, modifiers, smooth_faces, total_faces}`.
 
@@ -1216,11 +1247,16 @@ Shade faces flat, so every face reads as a distinct plane.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
-| `selected_only` | boolean | flag | `false` | no |
-| `clear_sharp_edges` | boolean | flag | `false` | no |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
+| `selected_only` | boolean | false (default) shades the WHOLE object, matching Object ▸ Shade Flat | `false` | no |
+| `clear_sharp_edges` | boolean | also remove every "sharp edge" mark | `false` | no |
 
 Returns: `{name, faces, selected_only, cleared_sharp_edges}`.
+
+Gotchas:
+
+- `selected_only=false` (the default) shades the WHOLE object, matching Blender's Object ▸ Shade Flat. That default is deliberate: a leftover selection would otherwise silently shade part of the mesh.
+- This is the way to undo an unwanted `mesh_shade_smooth`.
 
 ```python
 mesh_shade_flat(name="Crate")
@@ -1232,9 +1268,9 @@ Shade faces smooth, interpolating normals across them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
-| `selected_only` | boolean | flag | `false` | no |
-| `clear_sharp_edges` | boolean | flag | `false` | no |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
+| `selected_only` | boolean | false (default) shades the WHOLE object, matching Object ▸ Shade Smooth | `false` | no |
+| `clear_sharp_edges` | boolean | also remove every "sharp edge" mark | `false` | no |
 
 Returns: `{name, faces, selected_only, cleared_sharp_edges}`.
 
@@ -1271,19 +1307,19 @@ mesh_stats(name="Body", limit=200)
 
 Add resolution by cutting the selected edges into segments.
 
-**vs:** vs `mesh_edge_ring_subdivide` vs `add_subsurf` — subdivide to densify a selection; edge-ring for a single control loop that keeps all-quads; subsurf when you want it non-destructive and retunable.
+**vs:** `mesh_edge_ring_subdivide` vs `add_subsurf` — subdivide to densify a selection; edge-ring for a single control loop that keeps all-quads; subsurf when you want it non-destructive and retunable.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
-| `cuts` | integer | count | `1` | no |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
+| `cuts` | integer | new vertices per selected edge — 1 halves each edge, 2 thirds it | `1` | no |
 | `smoothness` | number | 0 keeps the surface put; 1 rounds it outward | `0.0` | no |
 | `smooth_falloff` | string | curve used by `smoothness` | `SMOOTH` | no |
 | `fractal` | number | random displacement in world units | none | no |
 | `along_normal` | number | 0-1 bias of `fractal` toward the vertex normal | none | no |
 | `seed` | integer | RNG seed | `0` | no |
 | `quad_corner_type` | string | how a quad with two adjacent cut edges is resolved | `STRAIGHT_CUT` | no |
-| `use_grid_fill` | boolean | flag | `true` | no |
+| `use_grid_fill` | boolean | fill fully-cut quads with a clean grid rather than a fan | `true` | no |
 
 Returns: `{name, before, after, created, subdivided_edges, cuts, smoothness, new_inner_vertices}`.
 
@@ -1302,7 +1338,7 @@ Mirror one half of the mesh onto the other, discarding the old half.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `axis` | string | which half is KEPT and copied across: `-X` (default), `+X`, `-Y`, … | `-X` | no |
 | `threshold` | number | world units within which centre-line vertices are welded | `0.0001` | no |
 
@@ -1324,7 +1360,7 @@ Convert quads and n-gons into triangles.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `name` | string | name | — | yes |
+| `name` | string | MESH object name, from `get_scene_info` | — | yes |
 | `quad_method` | string | how each quad is split | `BEAUTY` | no |
 | `ngon_method` | string | how n-gons are split | `BEAUTY` | no |
 
@@ -1352,10 +1388,10 @@ Add an Armature modifier — bind a mesh to a skeleton for posing.
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | — | yes |
 | `armature` | string | ARMATURE object name | — | yes |
-| `use_deform_preserve_volume` | boolean | flag | none | no |
-| `use_vertex_groups` | boolean | flag | none | no |
-| `use_bone_envelopes` | boolean | flag | none | no |
-| `vertex_group` | string | vertex group name used as a mask | none | no |
+| `use_deform_preserve_volume` | boolean | dual-quaternion skinning; stops candy-wrapper collapse at twisted joints | none | no |
+| `use_vertex_groups` | boolean | deform from vertex groups matching bone names | none | no |
+| `use_bone_envelopes` | boolean | deform from bone envelope volumes instead of weights (crude) | none | no |
+| `vertex_group` | string | vertex group masking the WHOLE modifier's influence (not the per-bone weights) | none | no |
 | `name` | string | modifier name; omit for Blender's default "Armature" | none | no |
 | `settings` | object | property name -> value, written onto the datablock after creation | none | no |
 
@@ -1380,8 +1416,8 @@ Add a Boolean modifier — cut, fuse or intersect with another mesh.
 | `target` | string | the cutter MESH object; it is NOT hidden or deleted for you | — | yes |
 | `operation` | string | `DIFFERENCE`, `UNION`, `INTERSECT` | `DIFFERENCE` | no |
 | `solver` | string | `FLOAT`, `EXACT`, `MANIFOLD` (`FAST` is accepted and translated to `FLOAT`) | none | no |
-| `use_self` | boolean | flag | none | no |
-| `use_hole_tolerant` | boolean | flag | none | no |
+| `use_self` | boolean | let the EXACT solver handle self-intersecting input (slower) | none | no |
+| `use_hole_tolerant` | boolean | let the EXACT solver cope with small holes (slower) | none | no |
 | `name` | string | modifier name; omit for Blender's default "Boolean" | none | no |
 | `settings` | object | property name -> value, written onto the datablock after creation | none | no |
 
@@ -1404,7 +1440,7 @@ Add a Data Transfer modifier — copy weights, colours, UVs or normals across me
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | — | yes |
-| `source` | string | source MESH object name | — | yes |
+| `source` | string | MESH object to read the data from | — | yes |
 | `data_types` | array | list of transfer tokens, e.g. `VGROUP_WEIGHTS`, `UV`, `CUSTOM_NORMAL` | none | no |
 | `vert_mapping` | string | how a destination vertex finds source data | none | no |
 | `loop_mapping` | string | mapping for face-corner data | none | no |
@@ -1413,7 +1449,7 @@ Add a Data Transfer modifier — copy weights, colours, UVs or normals across me
 | `mix_mode` | string | how incoming data combines with what is there | none | no |
 | `mix_factor` | number | 0-1 blend against existing data | none | no |
 | `max_distance` | number | world units; source geometry beyond this is ignored | none | no |
-| `vertex_group` | string | vertex group name used as a mask | none | no |
+| `vertex_group` | string | vertex group on the DESTINATION limiting where data lands | none | no |
 | `name` | string | modifier name; omit for Blender's default "DataTransfer" | none | no |
 | `settings` | object | property name -> value, written onto the datablock after creation | none | no |
 
@@ -1438,8 +1474,8 @@ Add a Mirror modifier — symmetrical modelling from one half.
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | — | yes |
 | `axis` | array | axes to mirror across, e.g. `["X"]` or `["X", "Z"]` — the object's LOCAL axes, about its origin | none | no |
-| `use_clip` | boolean | flag | none | no |
-| `use_mirror_merge` | boolean | flag | none | no |
+| `use_clip` | boolean | stop vertices crossing the mirror plane while editing | none | no |
+| `use_mirror_merge` | boolean | weld vertices that land on the mirror plane | none | no |
 | `merge_threshold` | number | world units | none | no |
 | `mirror_object` | string | object name whose transform defines the mirror plane | none | no |
 | `bisect_axis` | array | axes to cut away before mirroring, same format as `axis` | none | no |
@@ -1462,7 +1498,7 @@ add_mirror(object="Body", axis=["X"], use_clip=True, merge_threshold=0.001)
 
 Add any modifier by its Blender type id, with optional settings in one call.
 
-**vs:** vs the dedicated `add_*` tools — use this only for types with no dedicated tool (ARRAY, BEVEL, DISPLACE, WELD, SIMPLE_DEFORM, NODES …).
+**vs:** the dedicated `add_*` tools — use this only for types with no dedicated tool (ARRAY, BEVEL, DISPLACE, WELD, SIMPLE_DEFORM, NODES …).
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1492,7 +1528,7 @@ Add a Multiresolution modifier — the base for multi-level sculpting.
 | `object` | string | object name; omit for the active object | — | yes |
 | `render_levels` | integer | Multires/Subsurf level at render time | none | no |
 | `quality` | integer | solver accuracy, 1-10 (default 3) | none | no |
-| `use_creases` | boolean | flag | none | no |
+| `use_creases` | boolean | respect edge crease weights | none | no |
 | `name` | string | modifier name; omit for Blender's default "Multires" | none | no |
 | `settings` | object | property name -> value, written onto the datablock after creation | none | no |
 
@@ -1512,7 +1548,7 @@ add_multires(object="Body", quality=3)
 
 Add a Remesh modifier — rebuild the topology as an even, uniform mesh.
 
-**vs:** vs `voxel_remesh` — the modifier is non-destructive and previewable; the sculpt tool rewrites the mesh data immediately and is the one to use mid-sculpt.
+**vs:** `voxel_remesh` — the modifier is non-destructive and previewable; the sculpt tool rewrites the mesh data immediately and is the one to use mid-sculpt.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1521,7 +1557,7 @@ Add a Remesh modifier — rebuild the topology as an even, uniform mesh.
 | `voxel_size` | number | VOXEL mode only — voxel edge length in world units (default 0.1) | none | no |
 | `octree_depth` | integer | resolution as a power of two | none | no |
 | `adaptivity` | number | 0-1; >0 simplifies flat regions | none | no |
-| `use_smooth_shade` | boolean | flag | none | no |
+| `use_smooth_shade` | boolean | output smooth-shaded faces instead of flat | none | no |
 | `name` | string | modifier name; omit for Blender's default "Remesh" | none | no |
 | `settings` | object | property name -> value, written onto the datablock after creation | none | no |
 
@@ -1547,7 +1583,7 @@ Add a Shrinkwrap modifier — pull a mesh onto the surface of another.
 | `wrap_method` | string | projection strategy | none | no |
 | `offset` | number | distance to hold off the target surface, world units | none | no |
 | `wrap_mode` | string | how `offset` is read relative to the target | none | no |
-| `vertex_group` | string | vertex group name used as a mask | none | no |
+| `vertex_group` | string | vertex group limiting the effect; weights act as per-vertex strength | none | no |
 | `name` | string | modifier name; omit for Blender's default "Shrinkwrap" | none | no |
 | `settings` | object | property name -> value, written onto the datablock after creation | none | no |
 
@@ -1570,8 +1606,8 @@ Add a Solidify modifier — give a flat surface real thickness.
 | `object` | string | object name; omit for the active object | — | yes |
 | `thickness` | number | shell thickness, world units (Blender default 0.01) | none | no |
 | `offset` | number | -1..1 — where the original surface sits in the shell (-1 outer, 0 centred, 1 inner) | none | no |
-| `even_thickness` | boolean | flag | none | no |
-| `use_rim` | boolean | flag | none | no |
+| `even_thickness` | boolean | keep thickness even across corners (writes `use_even_offset`) | none | no |
+| `use_rim` | boolean | fill the open boundary edges so the result is closed | none | no |
 | `solidify_mode` | string | `EXTRUDE` (fast) or `NON_MANIFOLD` | none | no |
 | `name` | string | modifier name; omit for Blender's default "Solidify" | none | no |
 | `settings` | object | property name -> value, written onto the datablock after creation | none | no |
@@ -1591,14 +1627,14 @@ add_solidify(object="Cloak", thickness=0.01, offset=-1.0, even_thickness=True)
 
 Add a Subdivision Surface modifier — the standard way to smooth a mesh.
 
-**vs:** vs `add_multires` — subsurf smooths and stores no displacement; multires stores sculpted detail per level so you can fix broad form at level 1 without losing pores at level 5.
+**vs:** `add_multires` — subsurf smooths and stores no displacement; multires stores sculpted detail per level so you can fix broad form at level 1 without losing pores at level 5.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | — | yes |
 | `levels` | integer | subdivision levels | none | no |
 | `render_levels` | integer | Multires/Subsurf level at render time | none | no |
-| `use_limit_surface` | boolean | flag | none | no |
+| `use_limit_surface` | boolean | evaluate the exact limit surface so viewport and render agree | none | no |
 | `subdivision_type` | string | `CATMULL_CLARK` or `SIMPLE` | none | no |
 | `quality` | integer | solver accuracy, 1-10 (default 3) | none | no |
 | `name` | string | modifier name; omit for Blender's default "Subdivision" | none | no |
@@ -1623,7 +1659,7 @@ Bake a modifier permanently into the mesh and remove it from the stack.
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | — | yes |
 | `modifier` | string | modifier name, or stack index as a number | — | yes |
-| `single_user` | boolean | flag | `false` | no |
+| `single_user` | boolean | copy shared mesh data first so Blender will apply | `false` | no |
 | `timeout` | number | seconds to wait for the bridge call | `300.0` | no |
 
 Returns: `{object, modifier, type, mode_before, vertices_before, vertices_after, note}`. The previous mode is reported and NOT restored.
@@ -1646,7 +1682,7 @@ Read an object's whole modifier stack, including every tunable property.
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | — | yes |
-| `include_properties` | boolean | flag | `true` | no |
+| `include_properties` | boolean | dump every settable property per modifier (large for Ocean/Fluid/Cloth) | `true` | no |
 | `limit` | integer | cap on the returned list (counts stay exact) | `1000` | no |
 
 Returns: `{object, object_type, count, modifiers, truncated}`; each modifier lists every SETTABLE property with its value, type and — for enums — the valid options in this build.
@@ -1736,6 +1772,10 @@ Delete a modifier, discarding its effect (the opposite of `apply_modifier`).
 
 Returns: `{object, removed, type, remaining}`.
 
+Gotchas:
+
+- Discards the modifier's effect entirely — the opposite of `apply_modifier`. Nothing is baked into the mesh.
+
 ```python
 remove_modifier(object="Wall", modifier="Boolean")
 ```
@@ -1792,9 +1832,10 @@ set_modifier_prop(object="Body", modifier="Mirror", settings={"use_axis": [True,
 
 ### clear_mask
 
-Clear the sculpt mask so the whole surface is editable again. GUI Blender only — fails under `blender --background`.
+Clear the sculpt mask so the whole surface is editable again.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1802,6 +1843,10 @@ Clear the sculpt mask so the whole surface is editable again. GUI Blender only �
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{cleared}`.
+
+Gotchas:
+
+- Pass `value=1.0` to flood-mask everything instead of clearing.
 
 ```python
 clear_mask(value=0.0, object="Body")
@@ -1817,6 +1862,10 @@ Turn dynamic topology off, keeping the current geometry.
 
 Returns: `{enabled}`.
 
+Gotchas:
+
+- Keeps the current geometry; only the dynamic subdivision stops. The vertex count you ended up with is what you keep.
+
 ```python
 dyntopo_disable(object="Body")
 ```
@@ -1825,7 +1874,7 @@ dyntopo_disable(object="Body")
 
 Turn on dynamic topology — the mesh subdivides under the brush as you sculpt.
 
-**vs:** vs `voxel_remesh` — dyntopo adds detail only where you brush and discards vertex colours/multires; voxel rebuilds the whole surface at one density.
+**vs:** `voxel_remesh` — dyntopo adds detail only where you brush and discards vertex colours/multires; voxel rebuilds the whole surface at one density.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1847,9 +1896,10 @@ dyntopo_enable(detail=12.0, mode="RELATIVE", refine_method="SUBDIVIDE_COLLAPSE",
 
 ### dyntopo_flood_fill
 
-Re-tessellate the whole mesh to the current dyntopo detail level. GUI Blender only — fails under `blender --background`.
+Re-tessellate the whole mesh to the current dyntopo detail level.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1887,9 +1937,10 @@ enter_sculpt(object="Body")
 
 ### face_set_visibility
 
-Show or hide face sets: TOGGLE, SHOW_ACTIVE or HIDE_ACTIVE. GUI Blender only — fails under `blender --background`.
+Show or hide face sets: TOGGLE, SHOW_ACTIVE or HIDE_ACTIVE.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1909,9 +1960,10 @@ face_set_visibility(mode="HIDE_ACTIVE", object="Body")
 
 ### face_sets_create
 
-Create a face set from the mask, visible geometry, all, or selection. GUI Blender only — fails under `blender --background`.
+Create a face set from the mask, visible geometry, all, or selection.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1920,15 +1972,21 @@ Create a face set from the mask, visible geometry, all, or selection. GUI Blende
 
 Returns: `{created_from}`.
 
+Gotchas:
+
+- Face sets are named regions you can hide or isolate — the practical way to work on one limb without disturbing the rest.
+- `MASKED` turns your current mask into a face set, which is the normal route from a selection to an isolatable region.
+
 ```python
 face_sets_create(mode="MASKED", object="Body")
 ```
 
 ### face_sets_init
 
-Generate face sets automatically from mesh structure. GUI Blender only — fails under `blender --background`.
+Generate face sets automatically from mesh structure.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1964,9 +2022,10 @@ get_sculpt_state()
 
 ### invert_mask
 
-Invert the sculpt mask — protected becomes editable and vice versa. GUI Blender only — fails under `blender --background`.
+Invert the sculpt mask — protected becomes editable and vice versa.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1974,15 +2033,20 @@ Invert the sculpt mask — protected becomes editable and vice versa. GUI Blende
 
 Returns: `{inverted}`.
 
+Gotchas:
+
+- Masked geometry is PROTECTED. Mask the region you want to keep safe, or mask the region you care about and invert.
+
 ```python
 invert_mask(object="Body")
 ```
 
 ### mask_box
 
-Mask a rectangular screen region. GUI Blender only — fails under `blender --background`.
+Mask a rectangular screen region.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1992,7 +2056,7 @@ Mask a rectangular screen region. GUI Blender only — fails under `blender --ba
 | `ymax` | integer | region pixels, origin BOTTOM-LEFT | — | yes |
 | `mode` | string | `VALUE`, `VALUE_INVERSE`, `INVERT` | `VALUE` | no |
 | `value` | number | mask value 0-1 | `1.0` | no |
-| `front_faces_only` | boolean | flag | `false` | no |
+| `front_faces_only` | boolean | mask only front-facing geometry | `false` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{masked, region}` — `region` is the viewport size the pixel box was read against.
@@ -2008,9 +2072,10 @@ mask_box(xmin=120, xmax=640, ymin=200, ymax=560, mode="VALUE", value=1.0)
 
 ### mask_by_cavity
 
-Mask by surface cavity — automatically finds creases and crevices. GUI Blender only — fails under `blender --background`.
+Mask by surface cavity — automatically finds creases and crevices.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2020,21 +2085,26 @@ Mask by surface cavity — automatically finds creases and crevices. GUI Blender
 
 Returns: `{masked, applied}`.
 
+Gotchas:
+
+- The aging/wear pass: mask the cavities, `invert_mask`, then sculpt only the raised areas — or skip the invert to work only in the crevices.
+
 ```python
 mask_by_cavity(mix_mode="MIX", mix_factor=1.0, object="Body")
 ```
 
 ### mask_filter
 
-Grow, shrink, smooth or sharpen the existing mask. GUI Blender only — fails under `blender --background`.
+Grow, shrink, smooth or sharpen the existing mask.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `filter_type` | string | `GROW`, `SHRINK`, `SMOOTH`, `SHARPEN`, `CONTRAST_INCREASE`, `CONTRAST_DECREASE` | `SMOOTH` | no |
 | `iterations` | integer | repeat count | `1` | no |
-| `auto_iteration_count` | boolean | flag | `false` | no |
+| `auto_iteration_count` | boolean | let Blender pick the iteration count | `false` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{filter_type, iterations}`.
@@ -2052,12 +2122,12 @@ mask_filter(filter_type="SMOOTH", iterations=3, object="Body")
 
 Build the sculpt mask from the mesh's selected vertices.
 
-**vs:** vs `mask_box` — mask_from_selection works HEADLESS and is precise; mask_box needs a GUI and pixel coordinates.
+**vs:** `mask_box` — mask_from_selection works HEADLESS and is precise; mask_box needs a GUI and pixel coordinates.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `value` | number | mask value 0-1 | `1.0` | no |
-| `invert` | boolean | flag | `false` | no |
+| `invert` | boolean | mask the UNSELECTED vertices instead — usually what you want | `false` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{object, masked_vertices, total_vertices}`.
@@ -2097,7 +2167,7 @@ multires_set_level(sculpt_levels=2, levels=2, render_levels=3, object="Body")
 
 Retopologise into clean, evenly-flowing quads. Slow but high quality.
 
-**vs:** vs `voxel_remesh` — quadriflow last, once the form is final; voxel every time strokes have stretched the topology.
+**vs:** `voxel_remesh` — quadriflow last, once the form is final; voxel every time strokes have stretched the topology.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2105,11 +2175,11 @@ Retopologise into clean, evenly-flowing quads. Slow but high quality.
 | `mode` | string | `FACES` (use `target_faces`), `RATIO` (`target_ratio`), `EDGE` (`target_edge_length`) | `FACES` | no |
 | `target_ratio` | number | fraction of the current face count | none | no |
 | `target_edge_length` | number | world units | none | no |
-| `preserve_sharp` | boolean | flag | none | no |
-| `preserve_boundary` | boolean | flag | none | no |
-| `smooth_normals` | boolean | flag | none | no |
-| `use_mesh_symmetry` | boolean | flag | none | no |
-| `seed` | integer | RNG seed | none | no |
+| `preserve_sharp` | boolean | keep sharp edges — important for hard-surface models | none | no |
+| `preserve_boundary` | boolean | keep open boundaries in place | none | no |
+| `smooth_normals` | boolean | output smooth-shaded normals | none | no |
+| `use_mesh_symmetry` | boolean | remesh symmetrically | none | no |
+| `seed` | integer | RNG seed for the quad layout | none | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{object, mode, vertices_before, vertices_after, faces_before, faces_after}`.
@@ -2125,24 +2195,25 @@ quadriflow_remesh(target_faces=8000, mode="FACES", preserve_sharp=True, object="
 
 ### radial_strokes
 
-Strokes radiating out from a centre point, evenly spaced. GUI Blender only — fails under `blender --background`.
+Strokes radiating out from a centre point, evenly spaced.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
-**vs:** vs `sculpt_symmetry` — radial symmetry no longer exists in 5.x, so this is the only way to get evenly spaced repeated strokes around a hub.
+**vs:** `sculpt_symmetry` — radial symmetry no longer exists in 5.x, so this is the only way to get evenly spaced repeated strokes around a hub.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `center` | array | `[x, y, z]` world units | — | yes |
 | `radius` | number | stroke length in WORLD units (not pixels) | — | yes |
-| `count` | integer | count | `6` | no |
+| `count` | integer | number of strokes around the circle | `6` | no |
 | `steps` | integer | sample count along the path | `8` | no |
 | `axis` | string | `X`, `Y` or `Z` — the axis the circle is perpendicular to | `Z` | no |
-| `inward` | boolean | flag | `false` | no |
+| `inward` | boolean | stroke from the rim toward the centre (matters for Snake Hook and Grab) | `false` | no |
 | `space` | string | `OBJECT` or `WORLD` for the coordinates above | `OBJECT` | no |
 | `mode` | string | `NORMAL` or `INVERT` | `NORMAL` | no |
 | `size_px` | integer | brush radius in SCREEN PIXELS (not world units) | none | no |
-| `return_screenshot` | boolean | flag | `true` | no |
+| `return_screenshot` | boolean | return a viewport image alongside the result | `true` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: A summary `{object, strokes, points_applied, vertices}` AND a viewport PNG.
@@ -2159,15 +2230,20 @@ radial_strokes(center=[0, 0, 1.1], radius=0.35, count=8, steps=10, axis="Z", siz
 
 ### reveal_all
 
-Unhide all geometry hidden by face-set visibility. GUI Blender only — fails under `blender --background`.
+Unhide all geometry hidden by face-set visibility.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{revealed}`.
+
+Gotchas:
+
+- Call this whenever you finish with `face_set_visibility`. Forgotten hidden geometry is the usual reason a brush appears to do nothing.
 
 ```python
 reveal_all(object="Body")
@@ -2191,11 +2267,12 @@ sculpt_list_brushes()
 
 ### sculpt_mesh_filter
 
-Apply a filter to the whole mesh at once, no brushing. GUI Blender only — fails under `blender --background`.
+Apply a filter to the whole mesh at once, no brushing.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
-**vs:** vs brush strokes — the filter changes the WHOLE mesh (or the unmasked part) at once; strokes change one place. Mask, then filter, is how you inflate exactly one region.
+**vs:** brush strokes — the filter changes the WHOLE mesh (or the unmasked part) at once; strokes change one place. Mask, then filter, is how you inflate exactly one region.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2204,7 +2281,7 @@ Apply a filter to the whole mesh at once, no brushing. GUI Blender only — fail
 | `iterations` | integer | repeat count | `1` | no |
 | `deform_axis` | string | axis restriction for the filter | none | no |
 | `orientation` | string | filter orientation | none | no |
-| `return_screenshot` | boolean | flag | `false` | no |
+| `return_screenshot` | boolean | return a viewport image alongside the result | `false` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: A summary `{type, strength, iterations, object}` and, when `return_screenshot` is true, a viewport PNG.
@@ -2233,7 +2310,7 @@ Activate a sculpt brush and set its parameters.
 | `auto_smooth` | number | 0-1 smoothing blended into every dab | none | no |
 | `normal_radius` | number | 0-1 | none | no |
 | `falloff_shape` | string | `SPHERE` (default) or `PROJECTED` | none | no |
-| `use_frontface` | boolean | flag | none | no |
+| `use_frontface` | boolean | affect only front-facing geometry | none | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{brush, resolved_from, size_px, size_written_to, strength, strength_written_to, …}`. `size_written_to` is either `brush.size` or `unified_paint_settings.size`.
@@ -2251,9 +2328,10 @@ sculpt_set_brush(name="Clay Strips", size_px=55, strength=0.5, direction="ADD")
 
 ### sculpt_stroke
 
-Apply a brush stroke through a list of 3D points. GUI Blender only — fails under `blender --background`.
+Apply a brush stroke through a list of 3D points.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2261,7 +2339,7 @@ Apply a brush stroke through a list of 3D points. GUI Blender only — fails und
 | `space` | string | `OBJECT` or `WORLD` for the coordinates above | `OBJECT` | no |
 | `mode` | string | `NORMAL`, or `INVERT` to flip the brush for this stroke | `NORMAL` | no |
 | `size_px` | integer | brush radius in SCREEN PIXELS (not world units) | none | no |
-| `return_screenshot` | boolean | flag | `true` | no |
+| `return_screenshot` | boolean | return a viewport image alongside the result | `true` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: A summary `{object, points_applied, vertices, dropped_points}` AND a viewport PNG when `return_screenshot` is true.
@@ -2282,10 +2360,10 @@ Set mirror symmetry axes for sculpting.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `x` | boolean | flag | none | no |
-| `y` | boolean | flag | none | no |
-| `z` | boolean | flag | none | no |
-| `feather` | boolean | flag | none | no |
+| `x` | boolean | mirror across local X | none | no |
+| `y` | boolean | mirror across local Y | none | no |
+| `z` | boolean | mirror across local Z | none | no |
+| `feather` | boolean | soften the symmetry seam | none | no |
 | `radial_counts` | integer | accepted but IGNORED — radial symmetry was removed in 5.x | none | no |
 
 Returns: `{x, y, z, feather, radial_supported}` plus a `note` when `radial_counts` was ignored.
@@ -2301,9 +2379,10 @@ sculpt_symmetry(x=True, y=False, z=False, feather=True)
 
 ### stroke_curve
 
-Smooth brush stroke along a spline through control points. GUI Blender only — fails under `blender --background`.
+Smooth brush stroke along a spline through control points.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2312,7 +2391,7 @@ Smooth brush stroke along a spline through control points. GUI Blender only — 
 | `space` | string | `OBJECT` or `WORLD` for the coordinates above | `OBJECT` | no |
 | `mode` | string | `NORMAL` or `INVERT` | `NORMAL` | no |
 | `size_px` | integer | brush radius in SCREEN PIXELS (not world units) | none | no |
-| `return_screenshot` | boolean | flag | `true` | no |
+| `return_screenshot` | boolean | return a viewport image alongside the result | `true` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: A summary `{object, points_applied, vertices, dropped_points}` AND a viewport PNG.
@@ -2327,11 +2406,12 @@ stroke_curve(control_points=[[0, -0.8, 0.3], [0, -0.2, 0.62], [0, 0.4, 0.4]], st
 
 ### stroke_line
 
-Straight brush stroke from point a to point b. GUI Blender only — fails under `blender --background`.
+Straight brush stroke from point a to point b.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
-**vs:** vs `stroke_curve` vs `stroke_on_surface` — line for a straight ridge or crease; curve for organic flow through known 3D points; on_surface when you would rather draw on the screenshot than compute coordinates.
+**vs:** `stroke_curve` vs `stroke_on_surface` — line for a straight ridge or crease; curve for organic flow through known 3D points; on_surface when you would rather draw on the screenshot than compute coordinates.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2341,7 +2421,7 @@ Straight brush stroke from point a to point b. GUI Blender only — fails under 
 | `space` | string | `OBJECT` or `WORLD` for the coordinates above | `OBJECT` | no |
 | `mode` | string | `NORMAL` or `INVERT` | `NORMAL` | no |
 | `size_px` | integer | brush radius in SCREEN PIXELS (not world units) | none | no |
-| `return_screenshot` | boolean | flag | `true` | no |
+| `return_screenshot` | boolean | return a viewport image alongside the result | `true` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: A summary `{object, points_applied, vertices, dropped_points}` AND a viewport PNG.
@@ -2357,17 +2437,18 @@ stroke_line(a=[0, -0.9, 0.35], b=[0, 0.2, 0.55], steps=14, size_px=55)
 
 ### stroke_on_surface
 
-Draw a stroke by tracing a 2D path across the viewport. GUI Blender only — fails under `blender --background`.
+Draw a stroke by tracing a 2D path across the viewport.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `view_path_2d` | array | list of `[x, y]` viewport points | — | yes |
-| `normalized` | boolean | flag | `true` | no |
+| `normalized` | boolean | coordinates are 0-1 fractions of the viewport; false = raw region pixels | `true` | no |
 | `mode` | string | `NORMAL` or `INVERT` | `NORMAL` | no |
 | `size_px` | integer | brush radius in SCREEN PIXELS (not world units) | none | no |
-| `return_screenshot` | boolean | flag | `true` | no |
+| `return_screenshot` | boolean | return a viewport image alongside the result | `true` | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: A summary `{object, points_applied, vertices, missed_rays}` AND a viewport PNG.
@@ -2385,15 +2466,15 @@ stroke_on_surface(view_path_2d=[[0.42, 0.55], [0.5, 0.62], [0.58, 0.55]], normal
 
 Rebuild the mesh as an even voxel grid. The core sculpting workflow step.
 
-**vs:** vs `quadriflow_remesh` vs `dyntopo_enable` — voxel for uniform density mid-sculpt (seconds, welds separate blobs, all-quad-ish but topology-blind); quadriflow for the final production mesh (minutes, clean flowing quads, fails on non-manifold); dyntopo when you do not yet know where detail is needed and want it added only under the brush.
+**vs:** `quadriflow_remesh` vs `dyntopo_enable` — voxel for uniform density mid-sculpt (seconds, welds separate blobs, all-quad-ish but topology-blind); quadriflow for the final production mesh (minutes, clean flowing quads, fails on non-manifold); dyntopo when you do not yet know where detail is needed and want it added only under the brush.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `voxel_size` | number | cell size in WORLD units — cost scales roughly cubically | `0.05` | no |
-| `preserve_volume` | boolean | flag | `true` | no |
+| `preserve_volume` | boolean | keep the original volume rather than shrinking | `true` | no |
 | `adaptivity` | number | 0-1; >0 simplifies flat regions | none | no |
-| `preserve_attributes` | boolean | flag | none | no |
-| `fix_poles` | boolean | flag | none | no |
+| `preserve_attributes` | boolean | carry mesh attributes through the remesh where possible | none | no |
+| `fix_poles` | boolean | reduce pole vertices in the voxel output | none | no |
 | `object` | string | object name; omit for the active object | none | no |
 
 Returns: `{object, voxel_size, vertices_before, vertices_after, faces_before, faces_after}`.
@@ -2419,7 +2500,7 @@ voxel_remesh(voxel_size=0.02, preserve_volume=True, object="Body")
 
 Write one weight value to a set of vertices. The workhorse write tool.
 
-**vs:** vs `set_weights` vs `brush_stroke` — assign when every target vertex gets the SAME value; set_weights when each vertex needs its own; brush_stroke only when you genuinely want painterly falloff and have a GUI.
+**vs:** `set_weights` vs `brush_stroke` — assign when every target vertex gets the SAME value; set_weights when each vertex needs its own; brush_stroke only when you genuinely want painterly falloff and have a GUI.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2445,16 +2526,16 @@ assign_weights(mesh="Body", group="hand.L", verts_spec={"min": [0.35, -0.1, 0.9]
 
 Bind a mesh to an armature and generate its weights. Start of every rig.
 
-**vs:** vs `parent_mesh_to_armature` — same bind, different framing: `auto_weights` also offers `reuse_binding=true` to re-solve weights on an already-bound mesh without touching parenting or modifiers.
+**vs:** `parent_mesh_to_armature` — same bind, different framing: `auto_weights` also offers `reuse_binding=true` to re-solve weights on an already-bound mesh without touching parenting or modifiers.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `armature` | string | ARMATURE object name | — | yes |
 | `method` | string | `AUTOMATIC` (bone heat), `ENVELOPE`, `EMPTY` | `AUTOMATIC` | no |
-| `reuse_binding` | boolean | flag | `false` | no |
-| `keep_transform` | boolean | flag | `false` | no |
-| `xmirror` | boolean | flag | `false` | no |
+| `reuse_binding` | boolean | re-solve weights on an already-bound mesh, leaving parenting and modifiers alone | `false` | no |
+| `keep_transform` | boolean | preserve the child's WORLD position when parenting | `false` | no |
+| `xmirror` | boolean | mirror the generated weights across X for a symmetric character | `false` | no |
 | `timeout` | number | seconds to wait for the bridge call | `180.0` | no |
 
 Returns: `{mesh, armature, method, operator, vertex_groups, deform_bones, bones_without_group, modifiers}`. `bones_without_group` is your first check that the bind worked.
@@ -2471,9 +2552,10 @@ auto_weights(mesh="Body", armature="Rig", method="AUTOMATIC", timeout=180.0)
 
 ### brush_stroke
 
-Drag the weight brush along a path of 3D points. GUI Blender only.
+Drag the weight brush along a path of 3D points.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2508,9 +2590,9 @@ Unassign weights below a threshold. Removes the dust before export.
 | `mesh` | string | MESH object name | — | yes |
 | `threshold` | number | weights at or below this are unassigned, 0-1 | `0.01` | no |
 | `group` | string | vertex group name; omit for the active group | none | no |
-| `keep_single` | boolean | flag | `false` | no |
+| `keep_single` | boolean | never strand a vertex with zero groups — keep its strongest influence | `false` | no |
 | `group_select_mode` | string | `ACTIVE`, `ALL` or `BONE_DEFORM` | `ACTIVE` | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}`.
 
@@ -2553,7 +2635,7 @@ Read a page of weights from one group. Chunked — safe on dense meshes.
 | `group` | string | vertex group name; omit for the active group | — | yes |
 | `offset` | integer | vertex index to start scanning from; pass back `next_offset` | `0` | no |
 | `limit` | integer | cap on the returned list (counts stay exact) | `1000` | no |
-| `include_zero` | boolean | flag | `false` | no |
+| `include_zero` | boolean | also return vertices not in the group, as `weight: 0.0, assigned: false` | `false` | no |
 
 Returns: `{mesh, group, group_index, total_vertices, offset, next_offset, returned, truncated, weights}`. `next_offset` is null once the scan reached the end.
 
@@ -2574,12 +2656,16 @@ Replace every weight with `1 - weight`.
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `group` | string | vertex group name; omit for the active group | none | no |
-| `auto_assign` | boolean | flag | `true` | no |
-| `auto_remove` | boolean | flag | `true` | no |
+| `auto_assign` | boolean | add unassigned vertices at weight 1 (their implied 0 inverts to 1) | `true` | no |
+| `auto_remove` | boolean | unassign vertices whose weight inverts to 0 rather than storing a zero | `true` | no |
 | `group_select_mode` | string | `ACTIVE`, `ALL` or `BONE_DEFORM` | `ACTIVE` | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}`.
+
+Gotchas:
+
+- `auto_assign=true` (Blender's default) ADDS unassigned vertices to the group at weight 1, since their implied 0 inverts to 1. On a deform group that can suddenly bind the whole mesh to one bone — set it false unless you mean it.
 
 ```python
 invert(mesh="Body", group="forearm.L", auto_assign=True, auto_remove=True)
@@ -2596,9 +2682,13 @@ Remap weights with `(weight + offset) * gain`, clamped to 0..1.
 | `offset` | number | added to every weight before the gain, roughly -1..1 | `0.0` | no |
 | `group` | string | vertex group name; omit for the active group | none | no |
 | `group_select_mode` | string | `ACTIVE`, `ALL` or `BONE_DEFORM` | `ACTIVE` | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}`.
+
+Gotchas:
+
+- `gain` above 1 sharpens the falloff; a positive `offset` lifts the whole group toward 1. Results are clamped to 0..1, so an aggressive gain flattens the top of the falloff.
 
 ```python
 levels(mesh="Body", gain=1.4, offset=-0.05, group="forearm.L")
@@ -2613,7 +2703,7 @@ Keep only the N strongest influences per vertex. The game-export gate.
 | `mesh` | string | MESH object name | — | yes |
 | `max_influences` | integer | bone influences per vertex | `4` | no |
 | `group_select_mode` | string | `ACTIVE`, `ALL` or `BONE_DEFORM` | `ALL` | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}` — verify with `report_over_influenced`, not with this return.
 
@@ -2634,9 +2724,9 @@ Mirror weights across a local axis, swapping .L/.R group names as it goes.
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `axis` | string | `X`, `Y` or `Z` in the object's LOCAL space | `X` | no |
-| `use_topology` | boolean | flag | `false` | no |
-| `all_groups` | boolean | flag | `false` | no |
-| `flip_group_names` | boolean | flag | `true` | no |
+| `use_topology` | boolean | pair vertices by mesh topology instead of mirrored position — X AXIS ONLY | `false` | no |
+| `all_groups` | boolean | mirror every vertex group instead of just one | `false` | no |
+| `flip_group_names` | boolean | write into the name-flipped group (`Arm.L` -> `Arm.R`) | `true` | no |
 | `group` | string | vertex group name; omit for the active group | none | no |
 | `tolerance` | number | object-space world units for mirrored-pair matching | `0.0001` | no |
 | `timeout` | number | seconds to wait for the bridge call | `120.0` | no |
@@ -2661,7 +2751,7 @@ Scale one group so its highest weight becomes exactly 1.0.
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `group` | string | vertex group name; omit for the active group | none | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}`.
 
@@ -2677,14 +2767,14 @@ normalize(mesh="Body", group="forearm.L")
 
 Make each vertex's weights sum to 1.0 across groups. Run this before export.
 
-**vs:** vs `normalize` — normalize_all makes each VERTEX sum to 1 across groups (what exporters need); normalize scales ONE group's peak to 1.
+**vs:** `normalize` — normalize_all makes each VERTEX sum to 1 across groups (what exporters need); normalize scales ONE group's peak to 1.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
-| `lock_active` | boolean | flag | `true` | no |
+| `lock_active` | boolean | hold the active group fixed and redistribute the rest around it | `true` | no |
 | `group_select_mode` | string | `ACTIVE`, `ALL` or `BONE_DEFORM` | `ALL` | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}`.
 
@@ -2729,9 +2819,13 @@ Round weights onto N evenly spaced steps.
 | `steps` | integer | sample count along the path | `4` | no |
 | `group` | string | vertex group name; omit for the active group | none | no |
 | `group_select_mode` | string | `ACTIVE`, `ALL` or `BONE_DEFORM` | `ACTIVE` | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}`.
+
+Gotchas:
+
+- Mostly a stylisation and debugging tool: `steps=2` gives a hard 0-or-1 split, which makes a group's boundary obvious in `weight_heatmap`.
 
 ```python
 quantize(mesh="Body", steps=2, group="forearm.L")
@@ -2794,8 +2888,8 @@ Select vertices whose weight in a group falls inside a range.
 | `group` | string | vertex group name; omit for the active group | — | yes |
 | `min` | number | lower weight bound, inclusive, 0-1 | `0.0` | no |
 | `max` | number | upper weight bound, inclusive, 0-1 | `1.0` | no |
-| `include_unassigned` | boolean | flag | `false` | no |
-| `extend` | boolean | flag | `false` | no |
+| `include_unassigned` | boolean | treat vertices not in the group as weight 0 and match them | `false` | no |
+| `extend` | boolean | add to the existing selection instead of replacing it | `false` | no |
 | `limit` | integer | cap on the returned vertex list (`selected` stays exact) | `1000` | no |
 
 Returns: `{mesh, group, min, max, selected, vertices, truncated, note}`.
@@ -2812,14 +2906,14 @@ select_verts_by_weight(mesh="Body", group="forearm.L", min=0.01, max=0.2, limit=
 
 Bulk-write an explicit vertex-index to weight map into one group.
 
-**vs:** vs `weight_gradient` — set_weights is exact, headless and reproducible; the gradient depends on where the viewport camera points.
+**vs:** `weight_gradient` — set_weights is exact, headless and reproducible; the gradient depends on where the viewport camera points.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `group` | string | vertex group name — must already exist | — | yes |
 | `weights` | object | `{"<vertex_index>": weight}` map, weights 0-1 | — | yes |
-| `remove_zero` | boolean | flag | `false` | no |
+| `remove_zero` | boolean | a weight of 0 UNASSIGNS the vertex instead of storing a zero | `false` | no |
 
 Returns: `{mesh, group, vertices_written, vertices_removed}`.
 
@@ -2837,7 +2931,7 @@ set_weights(mesh="Body", group="forearm.L", weights={"412": 1.0, "413": 0.82, "4
 
 Blend each weight toward its connected neighbours. Fixes hard creases.
 
-**vs:** vs `levels` — smooth blends toward neighbours to fix creasing; levels remaps the whole group's contrast without changing its shape.
+**vs:** `levels` — smooth blends toward neighbours to fix creasing; levels remaps the whole group's contrast without changing its shape.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2847,7 +2941,7 @@ Blend each weight toward its connected neighbours. Fixes hard creases.
 | `expand` | number | -1.0 to 1.0; positive grows the region | `0.0` | no |
 | `group` | string | vertex group name; omit for the active group | none | no |
 | `group_select_mode` | string | `ACTIVE`, `ALL` or `BONE_DEFORM` | `ACTIVE` | no |
-| `only_selected` | boolean | flag | `false` | no |
+| `only_selected` | boolean | restrict to the mesh's current vertex selection (runs in Edit mode) | `false` | no |
 | `timeout` | number | seconds to wait for the bridge call | `120.0` | no |
 
 Returns: `{mesh, group, mode_used, only_selected}`.
@@ -2866,20 +2960,20 @@ smooth_weights(mesh="Body", factor=0.5, iterations=4, expand=0.0, group="shoulde
 
 Copy vertex-group weights from one mesh onto another.
 
-**vs:** vs `add_data_transfer` — the tool is the one-shot version that applies immediately; the modifier stays live until you apply it.
+**vs:** `add_data_transfer` — the tool is the one-shot version that applies immediately; the modifier stays live until you apply it.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `source` | string | source MESH object name | — | yes |
-| `target` | string | object name | — | yes |
+| `source` | string | MESH object to read weights from | — | yes |
+| `target` | string | MESH object to write weights to; its weights in matched groups are overwritten | — | yes |
 | `method` | string | vertex mapping: `POLYINTERP_NEAREST` (default), `TOPOLOGY`, `NEAREST`, `EDGE_NEAREST`, `EDGEINTERP_NEAREST`, `POLY_NEAREST`, `POLYINTERP_VNORPROJ` | `POLYINTERP_NEAREST` | no |
-| `name_matching` | boolean | flag | `true` | no |
+| `name_matching` | boolean | match destination groups BY NAME (false matches by index and scrambles weights) | `true` | no |
 | `layers_select_src` | string | `ALL`, `ACTIVE` or `BONE_DEFORM` | `ALL` | no |
 | `mix_mode` | string | `REPLACE`, `MIX`, `ADD`, `SUB`, `MUL`, `ABOVE_THRESHOLD`, `BELOW_THRESHOLD` | `REPLACE` | no |
 | `mix_factor` | number | 0-1 blend against existing data | `1.0` | no |
 | `max_distance` | number | world units; source geometry beyond this is ignored | none | no |
-| `use_create` | boolean | flag | `true` | no |
-| `use_object_transform` | boolean | flag | `true` | no |
+| `use_create` | boolean | create destination groups that do not exist yet | `true` | no |
+| `use_object_transform` | boolean | account for both objects' world transforms | `true` | no |
 | `timeout` | number | seconds to wait for the bridge call | `180.0` | no |
 
 Returns: `{source, target, method, name_matching, groups_created, target_groups, note}`.
@@ -2922,7 +3016,7 @@ Delete one vertex group, or every group on the mesh.
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `name` | string | vertex group name; required unless `all` is true | none | no |
-| `all` | boolean | flag | `false` | no |
+| `all` | boolean | delete EVERY vertex group (destructive — the armature stops deforming) | `false` | no |
 
 Returns: `{mesh, deleted, remaining}`.
 
@@ -2963,7 +3057,7 @@ Lock or unlock groups so normalize and auto-normalize cannot rewrite them.
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `name` | string|array | one group name or a list; omit to affect EVERY group | none | no |
-| `locked` | boolean | flag | `true` | no |
+| `locked` | boolean | true locks, false unlocks | `true` | no |
 
 Returns: `{mesh, locked, groups, all_locked}` — `all_locked:true` is why `normalize_all` will fail next.
 
@@ -2998,9 +3092,10 @@ vgroup_rename(mesh="Body", name="Bone.001", new_name="upper_arm.L")
 
 ### weight_gradient
 
-Paint a linear or radial weight gradient between two 3D points. GUI Blender only.
+Paint a linear or radial weight gradient between two 3D points.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -3011,7 +3106,7 @@ Paint a linear or radial weight gradient between two 3D points. GUI Blender only
 | `type` | string | `LINEAR` (band) or `RADIAL` (concentric around `start`) | `LINEAR` | no |
 | `weight` | number | 0-1 (not 0-100) | `1.0` | no |
 | `space` | string | `WORLD` (default) or `LOCAL` | `WORLD` | no |
-| `flip` | boolean | flag | `false` | no |
+| `flip` | boolean | swap the gradient ends, so it runs 0 -> weight | `false` | no |
 
 Returns: `{mesh, group, type, weight, start_region_px, end_region_px, region_size}` — the projected pixel coordinates it actually painted between.
 
@@ -3028,18 +3123,19 @@ weight_gradient(mesh="Body", start=[0.2, 0, 1.4], end=[0.55, 0, 1.1], group="upp
 
 ### weight_heatmap
 
-See one group's weights as the blue-to-red heatmap. Returns an image. GUI only.
+See one group's weights as the blue-to-red heatmap. Returns an image.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
-**vs:** vs `viewport_screenshot` — the heatmap forces Weight Paint mode and the overlay colours; a plain screenshot shows you nothing about weights.
+**vs:** `viewport_screenshot` — the heatmap forces Weight Paint mode and the overlay colours; a plain screenshot shows you nothing about weights.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `mesh` | string | MESH object name | — | yes |
 | `group` | string | vertex group name; omit for the active group | none | no |
-| `max_size` | integer | longest image edge, pixels | `1024` | no |
-| `show_contours` | boolean | flag | `false` | no |
+| `max_size` | integer | longest image edge in pixels — raise only to inspect fine detail | `1024` | no |
+| `show_contours` | boolean | draw iso-weight contour lines over the colours | `false` | no |
 | `use_render` | boolean | `false` (default) grabs viewport pixels — the ONLY way weight colours appear | `false` | no |
 
 Returns: A PNG image content block: blue 0, green ~0.5, red 1.0, black = not in the group at all.
@@ -3160,9 +3256,13 @@ Add bones to a bone collection, or remove them from it.
 | `armature` | string | ARMATURE object name | — | yes |
 | `collection` | string | bone collection name | — | yes |
 | `bones` | array | list of bone names | — | yes |
-| `unassign` | boolean | flag | `false` | no |
+| `unassign` | boolean | remove the bones from the collection instead of adding them | `false` | no |
 
 Returns: `{armature, collection, operation, bones, bone_count}` — per-bone `changed` is false when it was already in/out.
+
+Gotchas:
+
+- Membership is many-to-many — assigning does not remove a bone from any other collection.
 
 ```python
 bone_collection_assign(armature="Rig", collection="Controls", bones=["IK.hand.L", "IK.hand.R"])
@@ -3198,9 +3298,9 @@ Show, hide or solo a bone collection.
 | --- | --- | --- | --- | --- |
 | `armature` | string | ARMATURE object name | — | yes |
 | `collection` | string | bone collection name | — | yes |
-| `is_visible` | boolean | flag | none | no |
-| `is_solo` | boolean | flag | none | no |
-| `toggle` | boolean | flag | `false` | no |
+| `is_visible` | boolean | show or hide this collection's bones | none | no |
+| `is_solo` | boolean | hide every collection that is not soloed | none | no |
+| `toggle` | boolean | flip `is_visible` instead of setting it (ignored when `is_visible` is supplied) | `false` | no |
 
 Returns: `{armature, collection, is_solo_active}`.
 
@@ -3220,10 +3320,14 @@ List an armature's bone collections, their nesting and membership.
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `armature` | string | ARMATURE object name | — | yes |
-| `include_bones` | boolean | flag | `true` | no |
+| `include_bones` | boolean | list each collection's member bones | `true` | no |
 | `limit` | integer | cap on the returned list (counts stay exact) | `1000` | no |
 
 Returns: `{armature, count, roots, collections, truncated, is_solo_active}` with both `is_visible` and `is_visible_effectively`.
+
+Gotchas:
+
+- When bones are mysteriously invisible, compare `is_visible` against `is_visible_effectively`: a hidden ancestor or an active solo overrides the collection's own flag.
 
 ```python
 bone_collections_list(armature="Rig", include_bones=False, limit=100)
@@ -3265,8 +3369,8 @@ Edit one bone's REST geometry (edit mode), not its pose.
 | `tail` | array | `[x, y, z]` in ARMATURE-LOCAL space | none | no |
 | `roll` | number | twist about the bone axis, RADIANS | none | no |
 | `parent` | string | new parent bone name; `""` unparents | none | no |
-| `use_connect` | boolean | flag | none | no |
-| `use_deform` | boolean | flag | none | no |
+| `use_connect` | boolean | snap this bone's head onto the parent's tail and keep it there | none | no |
+| `use_deform` | boolean | whether the bone deforms bound meshes — set FALSE for IK targets and controls | none | no |
 | `name` | string | rename the bone (vertex groups are NOT renamed) | none | no |
 
 Returns: `{armature, bone, changed}`.
@@ -3333,7 +3437,7 @@ Bind a mesh to an armature so the bones deform it.
 | `mesh` | string | MESH object name | — | yes |
 | `armature` | string | ARMATURE object name | — | yes |
 | `mode` | string | `AUTOMATIC` (bone heat), `ENVELOPE`, `EMPTY` | `AUTOMATIC` | no |
-| `keep_transform` | boolean | flag | `false` | no |
+| `keep_transform` | boolean | preserve the child's WORLD position when parenting | `false` | no |
 
 Returns: `{mesh, armature, mode, parent_type, result, armature_modifiers, vertex_groups, vertex_groups_created, note}`.
 
@@ -3360,7 +3464,7 @@ Move, rotate or scale a bone's POSE — the transform animation records.
 | `scale` | array | `[sx, sy, sz]` multipliers, 1.0 = unchanged | none | no |
 | `space` | string | `LOCAL` (bone channels), `POSE` (armature space), `WORLD` | `LOCAL` | no |
 | `mode` | string | `absolute` sets; `delta` adds location and multiplies rotation/scale | `absolute` | no |
-| `rotation_mode` | string | value | none | no |
+| `rotation_mode` | string | force `QUATERNION`, `XYZ`…`ZYX`, or `AXIS_ANGLE` | none | no |
 
 Returns: `{armature, bone, space, mode, rotation_mode, location, rotation_quaternion, rotation_euler, scale, matrix_pose, head_pose, tail_pose}`.
 
@@ -3425,14 +3529,14 @@ Build a working IK setup: constraint plus the target and pole it needs.
 | `chain_length` | integer | bones the IK solver owns, counting up from the tip | `2` | no |
 | `target` | string | existing object to reach for; omit to create one at the tip's tail | none | no |
 | `target_bone` | string | bone name inside `target` when it is an armature | none | no |
-| `target_type` | string | what to create when `target` is omitted | `EMPTY` | no |
-| `auto_pole` | boolean | flag | `false` | no |
+| `target_type` | string | `EMPTY` (a plain-axes empty in the scene) or `BONE` (an unparented non-deforming bone) | `EMPTY` | no |
+| `auto_pole` | boolean | create a pole target so the elbow/knee bends predictably | `false` | no |
 | `pole_target` | string | existing pole object name | none | no |
 | `pole_bone` | string | bone name to use as the pole | none | no |
 | `pole_angle` | number | RADIANS about the root->target axis | none | no |
 | `pole_distance` | number | armature-local units from the joint | none | no |
-| `use_tail` | boolean | flag | `true` | no |
-| `use_stretch` | boolean | flag | `false` | no |
+| `use_tail` | boolean | the tip bone's TAIL reaches the target (false = its head) | `true` | no |
+| `use_stretch` | boolean | let the IK chain stretch to reach | `false` | no |
 | `name` | string | constraint name | none | no |
 
 Returns: `{armature, chain_tip, chain, chain_count, constraint, target, subtarget, pole_target, pole_subtarget, pole_angle, pole_angle_solved, created, is_valid}`.
@@ -3457,7 +3561,7 @@ Add a shape key to a mesh, curve, surface or lattice.
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | — | yes |
 | `name` | string | shape key name | `Key` | no |
-| `from_mix` | boolean | flag | `false` | no |
+| `from_mix` | boolean | capture the current blend of all active keys instead of the base shape | `false` | no |
 | `value` | number | initial value, 0-1 by default | none | no |
 
 Returns: `{object, created_basis, key, key_count}`. `created_basis:true` means a `Basis` was made first.
@@ -3481,6 +3585,10 @@ Snapshot the current blend of all shape keys into one new key.
 | `name` | string | shape key name | `Mix` | no |
 
 Returns: `{object, created_basis, key, key_count}`.
+
+Gotchas:
+
+- Identical to `shapekey_create(from_mix=true)`. Set the contributing keys with `shapekey_set_value` first — this captures the current blend, it does not compute one.
 
 ```python
 shapekey_from_mix(object="Head", name="smile_wide")
@@ -3518,6 +3626,11 @@ List an object's shape keys: values, slider ranges, masks and order.
 
 Returns: `{object, has_shape_keys, datablock, use_relative, reference_key, count, keys, truncated}`.
 
+Gotchas:
+
+- Start here before touching shape keys: each key's slider range is what silently clamps `shapekey_set_value`.
+- Returns `has_shape_keys: false` for an object that has none yet, rather than raising.
+
 ```python
 shapekey_list(object="Head", limit=100)
 ```
@@ -3533,8 +3646,8 @@ Set a shape key's value and its slider range, mute and masking.
 | `value` | number | 0-1 by default; CLAMPED to `[slider_min, slider_max]` | none | no |
 | `slider_min` | number | shape key slider lower bound | none | no |
 | `slider_max` | number | shape key slider upper bound | none | no |
-| `mute` | boolean | flag | none | no |
-| `vertex_group` | string | vertex group name used as a mask | none | no |
+| `mute` | boolean | disable the shape key without changing its value | none | no |
+| `vertex_group` | string | restrict the key's effect to this group; `""` removes the restriction | none | no |
 | `relative_key` | string | shape key this one is measured against (normally `Basis`) | none | no |
 
 Returns: `{object, key}` plus a `clamped` note when the slider range bit.
@@ -3608,7 +3721,7 @@ Put an existing material into an object's material slot.
 | `object` | string | object name; omit for the active object | — | yes |
 | `material` | string | material name | — | yes |
 | `slot` | integer | 0-based material slot index | none | no |
-| `to_selected_faces` | boolean | flag | `false` | no |
+| `to_selected_faces` | boolean | assign to the current face selection rather than the whole object | `false` | no |
 
 Returns: `{object, material, slot, slot_count, slots, faces_assigned, mode}`.
 
@@ -3634,10 +3747,10 @@ Bake surface detail into a texture with Cycles. Slow — expect tens of seconds.
 | `margin` | integer | pixels of bleed painted outside each UV island | `16` | no |
 | `samples` | integer | render/bake samples per pixel | `32` | no |
 | `filepath` | string | absolute output path for the PNG | none | no |
-| `return_image` | boolean | flag | `true` | no |
+| `return_image` | boolean | return the baked PNG as a viewable image (false for large bakes) | `true` | no |
 | `normal_space` | string | `TANGENT` (default) or `OBJECT` | none | no |
 | `pass_filter` | array | list of `COLOR`, `DIRECT`, `INDIRECT` | none | no |
-| `use_clear` | boolean | flag | `true` | no |
+| `use_clear` | boolean | wipe the image before baking (false to bake several objects into one texture) | `true` | no |
 | `timeout` | number | seconds to wait for the bridge call | `300.0` | no |
 
 Returns: A PNG image content block when `return_image` is true, otherwise `{image, filepath, size, samples, uv_auto_created, bake_target_nodes, empty_material_slots}`.
@@ -3763,6 +3876,11 @@ List materials, either every one in the file or one object's slots.
 
 Returns: `{count, materials, truncated}`; each entry carries `users` and a `principled` summary.
 
+Gotchas:
+
+- A material with `users: 0` is dropped on file reload unless `fake_user` is set.
+- Pass `object` to see slot order; empty slots appear as `{"slot": n, "name": null}`.
+
 ```python
 material_list(object="Body", limit=100)
 ```
@@ -3812,9 +3930,10 @@ set_node_prop(material="Skin", node="Principled BSDF", prop="Roughness", value=0
 
 ### set_viewport_shading
 
-Switch how the 3D viewport draws. GUI Blender only — fails under `--background`.
+Switch how the 3D viewport draws.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -3848,7 +3967,7 @@ Mark (or clear) UV seams — the cuts `unwrap` opens the mesh along.
 | --- | --- | --- | --- | --- |
 | `edges` | array|string | list of edge indices, or the string `SHARP` | — | yes |
 | `object` | string | object name; omit for the active object | none | no |
-| `clear` | boolean | flag | `false` | no |
+| `clear` | boolean | remove seams from these edges instead of adding them | `false` | no |
 | `angle` | number | RADIANS threshold for `edges="SHARP"`. Default 0.524 (30°) | none | no |
 
 Returns: `{object, edges_marked, cleared, total_seams}`.
@@ -3872,7 +3991,7 @@ Repack existing UV islands to use the 0-1 space efficiently.
 | `margin` | number | 0-1 gap between islands | none | no |
 | `rotate` | boolean | allow rotating islands; turn OFF when texture direction matters | none | no |
 | `scale` | boolean | allow scaling islands to fit | none | no |
-| `merge_overlap` | boolean | flag | none | no |
+| `merge_overlap` | boolean | merge islands that overlap exactly | none | no |
 | `shape_method` | string | `CONCAVE` (tightest), `CONVEX`, `AABB` (fastest) | none | no |
 | `margin_method` | string | how `margin` is measured | none | no |
 
@@ -3897,8 +4016,8 @@ Automatic UVs — splits the mesh by angle, no seams needed.
 | `angle_limit` | number | RADIANS split threshold. Blender's default 1.152 (66°) | none | no |
 | `island_margin` | number | 0-1 gap between islands | none | no |
 | `area_weight` | number | 0-1 bias toward face area | none | no |
-| `correct_aspect` | boolean | flag | none | no |
-| `scale_to_bounds` | boolean | flag | none | no |
+| `correct_aspect` | boolean | compensate for a non-square texture aspect | none | no |
+| `scale_to_bounds` | boolean | expand the layout to fill the whole 0-1 UV space | none | no |
 
 Returns: `{object, applied, uv_layers}`.
 
@@ -3917,15 +4036,15 @@ smart_uv_project(object="Body", angle_limit=1.152, island_margin=0.02)
 
 Unwrap the mesh along its marked seams.
 
-**vs:** vs `smart_uv_project` — unwrap needs authored seams and gives layouts a human can paint on; smart project needs nothing and gives many small islands, fine for baking.
+**vs:** `smart_uv_project` — unwrap needs authored seams and gives layouts a human can paint on; smart project needs nothing and gives many small islands, fine for baking.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `object` | string | object name; omit for the active object | none | no |
 | `method` | string | `ANGLE_BASED` (default), `CONFORMAL`, `MINIMUM_STRETCH` | `ANGLE_BASED` | no |
 | `margin` | number | 0-1 space between islands | none | no |
-| `fill_holes` | boolean | flag | none | no |
-| `correct_aspect` | boolean | flag | none | no |
+| `fill_holes` | boolean | close holes in the UV islands | none | no |
+| `correct_aspect` | boolean | compensate for a non-square texture aspect | none | no |
 | `margin_method` | string | how `margin` is measured | none | no |
 
 Returns: `{object, method, seams, applied, uv_layers, note}` — a `seams: 0` warning is the usual cause of one stretched island.
@@ -3950,6 +4069,11 @@ Add a UV layer.
 | `active` | boolean | which object is the anchor / active | `true` | no |
 
 Returns: `{object, created, layers}`.
+
+Gotchas:
+
+- A second layer is the usual setup for lightmaps or baked AO, keeping the original layout for texturing.
+- `active` only affects editing. For a bake you also need `uv_layer_set_active(for_render=true)`.
 
 ```python
 uv_layer_create(name="Lightmap", object="Hull", active=True)
@@ -4000,7 +4124,7 @@ Make a UV layer active for editing, and optionally for rendering.
 | --- | --- | --- | --- | --- |
 | `name` | string | UV layer name | — | yes |
 | `object` | string | object name; omit for the active object | none | no |
-| `for_render` | boolean | flag | `false` | no |
+| `for_render` | boolean | also make it the layer materials and bakes use | `false` | no |
 
 Returns: `{object, active, active_render}`.
 
@@ -4047,9 +4171,13 @@ Assign an action to an object, creating it if it does not exist.
 | --- | --- | --- | --- | --- |
 | `action` | string | action name; created when missing | — | yes |
 | `object` | string | object name; omit for the active object | none | no |
-| `create_if_missing` | boolean | flag | `true` | no |
+| `create_if_missing` | boolean | create the datablock when it does not exist | `true` | no |
 
 Returns: `{object, action, frame_range}`.
+
+Gotchas:
+
+- Assign a named action BEFORE keying, so takes stay separable and can later be pushed into the NLA with `nla_push_down`.
 
 ```python
 assign_action(action="Walk", object="Rig", create_if_missing=True)
@@ -4137,9 +4265,10 @@ nla_push_down(object="Rig", track_name="Walk")
 
 ### playblast
 
-Render an OpenGL preview of the animation. GUI Blender only — fails under `blender --background`.
+Render an OpenGL preview of the animation.
 
-**GUI Blender only** — refuses under `blender --background`.
+**GUI Blender only** — refuses under `blender --background`; sculpt-session
+operators would segfault, so the handler refuses before invoking them.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -4177,6 +4306,10 @@ Delete a keyframe. Errors when there is no key at that frame.
 | `index` | integer | vector component; -1 removes all | `-1` | no |
 
 Returns: `{object, data_path, frame, removed}`.
+
+Gotchas:
+
+- Errors when there is no key at that frame — call `list_keyframes` first rather than guessing.
 
 ```python
 remove_keyframe(data_path="location", frame=24, object="Rig", index=-1)
@@ -4277,9 +4410,14 @@ Attach a Geometry Nodes modifier to an object.
 | `group` | string | node group name; created pre-wired when missing | none | no |
 | `object` | string | object name; omit for the active object | none | no |
 | `name` | string | modifier name, used to address it later | `GeometryNodes` | no |
-| `create_if_missing` | boolean | flag | `true` | no |
+| `create_if_missing` | boolean | create the datablock when it does not exist | `true` | no |
 
 Returns: `{object, modifier, group, inputs}`.
+
+Gotchas:
+
+- Non-destructive: the base mesh is untouched until `apply_modifier`.
+- Set values through `geonodes_set_input` on the modifier, not by editing the graph, once a value is exposed as a group input.
 
 ```python
 add_geonodes_modifier(group="Scatter", object="Terrain", name="Scatter", create_if_missing=True)
@@ -4341,7 +4479,7 @@ Create a Geometry Nodes group, pre-wired Group Input -> Group Output.
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
 | `name` | string | node group name | `Geometry Nodes` | no |
-| `with_default_io` | boolean | flag | `true` | no |
+| `with_default_io` | boolean | pre-wire Group Input -> Group Output | `true` | no |
 
 Returns: `{group, nodes, sockets}`; each socket carries the `identifier` (`Socket_0`, …) the modifier addresses it by.
 
@@ -4363,6 +4501,10 @@ Read a node group's whole graph: interface sockets, nodes and links.
 | `limit` | integer | cap on the returned list (counts stay exact) | `200` | no |
 
 Returns: `{group, type, interface, nodes, links, node_count, link_count, truncated}`.
+
+Gotchas:
+
+- Read this before modifying an existing setup. Unlinked input sockets report their `default_value`; linked ones report `linked: true`, and setting those does nothing.
 
 ```python
 geonodes_get_graph(group="Scatter", limit=200)
@@ -4402,6 +4544,10 @@ List a Geometry Nodes modifier's inputs with their current values.
 
 Returns: `{object, modifier, group, inputs}` with each socket's name, `identifier`, type and current value.
 
+Gotchas:
+
+- Call this before `geonodes_set_input` to learn each socket's `identifier`. Geometry sockets report no value — they are wired in the graph, not set on the modifier.
+
 ```python
 geonodes_list_inputs(modifier="Scatter", object="Terrain")
 ```
@@ -4416,6 +4562,10 @@ Remove a node from a group. Its links go with it.
 | `node` | string | node name from the graph dump | — | yes |
 
 Returns: `{group, removed, node_count}`.
+
+Gotchas:
+
+- Its links go with it and nothing is re-routed — a node removed mid-chain breaks the geometry flow until you re-link.
 
 ```python
 geonodes_remove_node(group="Scatter", node="Distribute Points on Faces")
@@ -4478,11 +4628,11 @@ Export the scene, or just the selection, to a 3D model file.
 | --- | --- | --- | --- | --- |
 | `path` | string | absolute filesystem path | — | yes |
 | `format` | string | `OBJ`, `STL`, `PLY`, `FBX`, `GLTF`, `USD`, `ABC`, or `auto` (from the extension) | `auto` | no |
-| `selected_only` | boolean | flag | `false` | no |
+| `selected_only` | boolean | export only selected objects; fails fast when nothing is selected | `false` | no |
 | `scale` | number | uniform export scale; IGNORED by GLTF and USD | none | no |
 | `forward_axis` | string | source/target forward axis convention | none | no |
 | `up_axis` | string | source/target up axis convention | none | no |
-| `apply_modifiers` | boolean | flag | none | no |
+| `apply_modifiers` | boolean | evaluate modifiers before export (not available for ABC or USD) | none | no |
 | `options` | object | raw operator kwargs passed straight through | none | no |
 | `timeout` | number | seconds to wait for the bridge call | `180.0` | no |
 
@@ -4573,7 +4723,7 @@ Save the .blend file.
 | --- | --- | --- | --- | --- |
 | `path` | string | absolute filesystem path | none | no |
 | `confirm` | boolean | required only when `path` names a DIFFERENT existing file | `false` | no |
-| `compress` | boolean | flag | `false` | no |
+| `compress` | boolean | write a compressed .blend | `false` | no |
 
 Returns: `{path, bytes}`.
 
@@ -4598,7 +4748,7 @@ Report or clear the documentation cache under ~/.cache/blender-agent-mcp.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `clear` | boolean | flag | `false` | no |
+| `clear` | boolean | empty the cache under `~/.cache/blender-agent-mcp` | `false` | no |
 
 Returns: `{path, entries, bytes, cleared}`.
 
