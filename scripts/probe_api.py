@@ -130,6 +130,56 @@ print("\n[core plumbing]")
 check("Context.temp_override", hasattr(bpy.types.Context, "temp_override"))
 check("bpy.app.timers", hasattr(bpy.app, "timers"))
 
+print("\n[shader graphs + images]")
+probe_mat = bpy.data.materials.new("Agent API Probe")
+probe_tree = probe_mat.node_tree
+check("new material has node tree", probe_tree is not None)
+probe_noise = probe_tree.nodes.new("ShaderNodeTexNoise")
+probe_noise["_blender_agent_id"] = "probe.noise"
+check("shader nodes support custom stable ids",
+      probe_noise.get("_blender_agent_id") == "probe.noise")
+probe_ramp = probe_tree.nodes.new("ShaderNodeValToRGB")
+probe_ramp.color_ramp.elements.new(0.5)
+check("ColorRamp mutable elements", len(probe_ramp.color_ramp.elements) == 3)
+probe_image = bpy.data.images.new(
+    "Agent Image Probe", width=2, height=2, alpha=True,
+    float_buffer=False, is_data=True,
+)
+check("generated image + colorspace API",
+      hasattr(probe_image, "generated_type")
+      and hasattr(probe_image, "colorspace_settings"))
+if hasattr(probe_image, "is_data"):
+    NOTES.append("Image.is_data is BACK — image reporting can use it directly")
+
+print("\n[animation + cinematics]")
+action_props = {prop.identifier for prop in bpy.types.Action.bl_rna.properties}
+check("Action layers API", "layers" in action_props)
+editor = bpy.context.scene.sequence_editor_create()
+check("SequenceEditor.strips", hasattr(editor, "strips"))
+check("SequenceEditor.sequences remains absent", not hasattr(editor, "sequences"),
+      "(legacy collection came back; current strips API still preferred)")
+strip_functions = {fn.identifier for fn in editor.strips.bl_rna.functions}
+check("sequencer strip constructors",
+      {"new_image", "new_movie", "new_sound", "new_effect", "remove"}
+      <= strip_functions, f"got {sorted(strip_functions)}")
+image_params = {
+    prop.identifier
+    for prop in editor.strips.bl_rna.functions["new_image"].parameters
+}
+check("new_image 5.2 signature",
+      {"name", "filepath", "channel", "frame_start", "fit_method"}
+      <= image_params, f"got {sorted(image_params)}")
+strip_props = {prop.identifier for prop in bpy.types.Strip.bl_rna.properties}
+check("new sequencer timing handles",
+      {"left_handle", "right_handle", "duration", "content_start", "content_end"}
+      <= strip_props, f"got {sorted(strip_props)}")
+probe_camera_data = bpy.data.cameras.new("Agent Camera Probe Data")
+probe_camera = bpy.data.objects.new("Agent Camera Probe", probe_camera_data)
+bpy.context.scene.collection.objects.link(probe_camera)
+probe_marker = bpy.context.scene.timeline_markers.new("AGENT_PROBE", frame=1)
+probe_marker.camera = probe_camera
+check("timeline marker camera binding", probe_marker.camera == probe_camera)
+
 print("\n" + "=" * 68)
 for note in NOTES:
     print(f"note: {note}")

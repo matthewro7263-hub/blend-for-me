@@ -1,7 +1,7 @@
 # Verified Blender / MCP API notes
 
 Everything here was **verified by live introspection** against the actual installed
-software on 2026-08-07, not from memory. Blender **5.2.0 LTS** (Python 3.13.13),
+software on 2026-08-08, not from memory. Blender **5.2.0 LTS** (Python 3.13.13),
 `mcp` Python SDK **2.0.0**, Claude Code **2.1.220**, macOS 27.0 (arm64).
 
 Re-verify with `make probe` after a Blender upgrade.
@@ -230,3 +230,28 @@ subsequent read is accurate. Leaving Sculpt Mode also flushes.
 Screenshots are unaffected — the viewport draws from the sculpt session, so a
 `viewport_screenshot` shows the change even while the mesh data still reads
 stale. When a stroke's numbers and its screenshot disagree, trust the screenshot.
+
+## 10. Shader, image and Video Sequencer APIs added to the probe
+
+Verified live while adding production authoring tools:
+
+* Shader nodes accept ID custom properties, so `build_node_graph` stores a stable
+  caller id on each node instead of relying on Blender's auto-numbered display
+  names. `ShaderNodeValToRGB.color_ramp.elements` is mutable and supports adding,
+  removing and recoloring stops.
+* `bpy.data.images.new(..., is_data=True)` still accepts the constructor flag, but
+  the resulting Blender 5.2 `Image` exposes **no `is_data` property**. The durable
+  observable state is `image.colorspace_settings.name == "Non-Color"`.
+* The old `SequenceEditor.sequences` collection is gone. Blender 5.2 uses
+  `SequenceEditor.strips` / `strips_all`; constructors are collection methods
+  `new_image`, `new_movie`, `new_sound`, `new_scene`, `new_effect`, etc.
+* New sequencer timing fields are `left_handle`, `right_handle`, `duration`,
+  `content_start` and `content_end`. `frame_start` / `frame_final_*` still work but
+  emit 6.0-removal warnings. Moving source and handles together still requires
+  `frame_start` in 5.2, so that one compatibility write is warning-suppressed.
+* A timeline camera cut is a regular `TimelineMarker` whose `.camera` points at a
+  camera object. Blender switches cameras automatically as the playhead crosses
+  those markers.
+* Generated images, text/color/image/sound strips, two-camera markers, bulk
+  slotted-action keys and a final headless two-frame sequencer PNG render are all
+  covered by `tests/headless_smoke.py` rather than only by introspection.
