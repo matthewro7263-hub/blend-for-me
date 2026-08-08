@@ -11,7 +11,7 @@ from . import core  # noqa: F401
 
 _OPTIONAL = (
     "objects", "mesh", "modifiers", "sculpt", "weights",
-    "rig", "shading", "uv", "anim", "geonodes", "settings",
+    "rig", "shading", "uv", "anim", "cinematics", "geonodes", "settings",
     "properties", "io",
 )
 

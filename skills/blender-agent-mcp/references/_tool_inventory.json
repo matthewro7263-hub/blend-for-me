@@ -1,6 +1,6 @@
 {
  "generated_by": "skills/blender-agent-mcp/scripts/gen_tool_inventory.py",
- "tool_count": 220,
+ "tool_count": 231,
  "modules": [
   "core",
   "objects",
@@ -12,13 +12,14 @@
   "shading",
   "uv",
   "anim",
+  "cinematics",
   "geonodes",
   "settings",
   "properties",
   "io",
   "docs"
  ],
- "bridge_command_count": 214,
+ "bridge_command_count": 225,
  "bridge_source": "blender-runtime",
  "tools": [
   {
@@ -95,8 +96,24 @@
     },
     {
      "name": "value",
-     "type": "array",
+     "type": "any",
      "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "insert_keyframes_bulk",
+   "module": "anim",
+   "summary": "Animate many objects, bones, channels and custom properties in one call.",
+   "description": "Animate many objects, bones, channels and custom properties in one call.\n\n        Use this for a complete motion beat instead of making one MCP round trip\n        per key. The whole operation is one Blender undo step.\n\n        Each track requires:\n\n        - `object`: exact object name;\n        - `data_path`: `location`, `rotation_euler`, `scale`, `hide_render`, or a\n          custom property path such as `[\"mouth_open\"]`;\n        - `keys`: `[{\"frame\": 1, \"value\": [...]}, ...]`.\n\n        Optional track fields are `bone`, `index` (-1 keys every vector component),\n        `interpolation`, `easing`, and `clear_range: [start,end]`. A key may override\n        `interpolation`/`easing`. Supported interpolation includes `CONSTANT`,\n        `LINEAR`, `BEZIER`, and Blender easing curves. Euler values are radians;\n        quaternion values are `[w,x,y,z]`.\n\n        Custom properties must already exist (create them with\n        `set_custom_property`). Existing keys at the same frame are updated.\n        `clear_range` removes matching channel points first, making generated takes\n        deterministic without deleting unrelated channels.\n\n        Returns per-track action/channel details, requested keys inserted, actual\n        F-Curve points touched (a vector key creates several), and points cleared.\n        One call is capped at 500 tracks / 10,000 requested keys.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "tracks",
+     "type": "array",
+     "required": true,
      "default": null,
      "description": ""
     }
@@ -379,6 +396,635 @@
     {
      "name": "frame_range",
      "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "add_color_strip",
+   "module": "cinematics",
+   "summary": "Create/update a solid RGB background, slate, flash or transition card.",
+   "description": "Create/update a solid RGB background, slate, flash or transition card.\n\n        `frame_end` is exclusive. Higher-channel image/text strips composite over\n        the color. Reusing the same COLOR name updates its timing and colour.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_start",
+     "type": "integer",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_end",
+     "type": "integer",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "channel",
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "add_media_strip",
+   "module": "cinematics",
+   "summary": "Add a still image, movie or sound to Blender's Video Sequencer.",
+   "description": "Add a still image, movie or sound to Blender's Video Sequencer.\n\n        Args:\n            type: `IMAGE`, `MOVIE`, or `SOUND`.\n            path: Existing local media file on the Blender machine.\n            name: Stable strip name. Defaults to the filename. A same-name/type/\n                source strip is safely reused on retry.\n            channel: Sequencer track, 1-128. Higher channels composite over lower.\n            frame_start: First visible frame.\n            frame_end: Exclusive visible end. Pass this or `duration`, not both.\n            duration: Visible frame count; especially useful for still images.\n            fit_method: Image/movie sizing such as `FIT`, `FILL`, or `STRETCH`.\n            volume / pan: Audio controls when the strip supports them.\n            add_audio: For MOVIE, also create/reuse `<name>.Audio` from its audio\n                stream. Blender video strips do not include sound automatically.\n            audio_channel: Channel for paired movie audio. Defaults adjacent.\n            reuse_existing: Retry-safe default. False refuses duplicate names.\n\n        Source mismatch under an existing name is refused rather than silently\n        replacing an edit. Use `remove_sequencer_strips` or choose a new name.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "type",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "channel",
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "description": ""
+    },
+    {
+     "name": "frame_start",
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "description": ""
+    },
+    {
+     "name": "frame_end",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "duration",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "fit_method",
+     "type": "string",
+     "required": false,
+     "default": "FIT",
+     "description": ""
+    },
+    {
+     "name": "volume",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "pan",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "add_audio",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "audio_channel",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "reuse_existing",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "add_text_strip",
+   "module": "cinematics",
+   "summary": "Create or update a title, lower-third, caption or subtitle strip.",
+   "description": "Create or update a title, lower-third, caption or subtitle strip.\n\n        Frames use an exclusive `frame_end`. Colours are RGBA 0-1; `location` is\n        normalized render space. Repeating a TEXT strip name updates it, making a\n        generated subtitle pass safe to rerun. Shadow, outline and box controls\n        provide readable broadcast-style captions without hand-editing Blender UI.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "text",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_start",
+     "type": "integer",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_end",
+     "type": "integer",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "channel",
+     "type": "integer",
+     "required": false,
+     "default": 3,
+     "description": ""
+    },
+    {
+     "name": "font_size",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "location",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "alignment_x",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "anchor_x",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "anchor_y",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "wrap_width",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_shadow",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "shadow_color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "shadow_angle",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "shadow_offset",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "shadow_blur",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_outline",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "outline_color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "outline_width",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_box",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "box_color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "box_margin",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "box_roundness",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_bold",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_italic",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "build_camera_cuts",
+   "module": "cinematics",
+   "summary": "Build a retry-safe multi-camera shot plan from named cut markers.",
+   "description": "Build a retry-safe multi-camera shot plan from named cut markers.\n\n        Args:\n            cuts: Ordered or unordered specs like\n                `{\"name\":\"SHOT_010\",\"frame\":1,\"camera\":\"Camera_Wide\"}`.\n                Names and frames must be unique; camera objects must exist.\n            scene: Scene name; defaults to the current scene.\n            clear_existing: Remove existing camera-bound markers first. Plain\n                production markers survive. False updates cuts by name and refuses\n                an ambiguous second camera at an occupied frame.\n            set_scene_range: Move scene start to the first cut. `frame_end` is\n                applied when supplied.\n            frame_end: End of the final shot/render range. Must not precede the\n                final camera cut.\n\n        Blender evaluates the bound camera automatically as the playhead crosses\n        each marker. The scene camera is also set immediately to the cut active at\n        the current frame. Repeating the same named plan updates rather than\n        duplicates it, and the whole build is one undo step.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "cuts",
+     "type": "array",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "clear_existing",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "set_scene_range",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "frame_end",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "list_sequencer_strips",
+   "module": "cinematics",
+   "summary": "List Video Sequencer strips in timeline order with edit-relevant state.",
+   "description": "List Video Sequencer strips in timeline order with edit-relevant state.\n\n        Entries include type, channel, visible start/end/duration, source path,\n        mute/lock/blend state, audio volume/pan, text settings and transforms where\n        applicable. It reads nested Meta contents too, though mutation tools only\n        edit top-level strips to avoid hidden destructive changes.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "default": 1000,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "list_timeline_markers",
+   "module": "cinematics",
+   "summary": "List timeline markers and derive the effective camera-cut shot ranges.",
+   "description": "List timeline markers and derive the effective camera-cut shot ranges.\n\n        Camera-bound markers are sorted into `shots`; each shot runs from its\n        marker through the frame before the next camera marker, with the final\n        shot ending at the scene end. Plain markers remain useful for beats,\n        dialogue cues, VFX notes and editorial sync points.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "remove_sequencer_strips",
+   "module": "cinematics",
+   "summary": "Remove explicitly named top-level Video Sequencer strips.",
+   "description": "Remove explicitly named top-level Video Sequencer strips.\n\n        There is no implicit clear-all. Missing names are reported separately so\n        cleanup calls are safely retryable. Nested Meta-strip contents are refused.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "names",
+     "type": "array",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "remove_timeline_markers",
+   "module": "cinematics",
+   "summary": "Remove named markers, all camera cuts, or explicitly every marker.",
+   "description": "Remove named markers, all camera cuts, or explicitly every marker.\n\n        At least one selector is required; a blank call refuses to do anything.\n        `camera_only=true` preserves plain beat/dialogue markers. `remove_all=true`\n        is the explicit destructive option.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "names",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "camera_only",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "remove_all",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "render_animation",
+   "module": "cinematics",
+   "summary": "Render the final camera-cut animation or edited sequencer to MP4/PNGs.",
+   "description": "Render the final camera-cut animation or edited sequencer to MP4/PNGs.\n\n        Unlike GUI-only `playblast`, this is the real render pipeline and works\n        headless. With `use_sequencer=true` it outputs the Video Sequencer edit;\n        otherwise it renders the active camera and timeline-bound camera cuts.\n\n        `MP4` configures MPEG-4/H.264. `PNG` writes a numbered image sequence using\n        `out_path` as the prefix. Optional range/resolution/fps/engine/samples are\n        temporary and restored afterward. Rendering is intentionally allowed to be\n        long; set `timeout` for the production workload. The result verifies files,\n        byte count and frame count but never returns video bytes.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "out_path",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "format",
+     "type": "string",
+     "required": false,
+     "default": "MP4",
+     "description": ""
+    },
+    {
+     "name": "frame_start",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_end",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "resolution",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "percentage",
+     "type": "integer",
+     "required": false,
+     "default": 100,
+     "description": ""
+    },
+    {
+     "name": "fps",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "fps_base",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "engine",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "samples",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_sequencer",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    },
+    {
+     "name": "timeout",
+     "type": "number",
+     "required": false,
+     "default": 3600.0,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "update_strip",
+   "module": "cinematics",
+   "summary": "Update timing, compositing, audio, text or 2D transform on one strip.",
+   "description": "Update timing, compositing, audio, text or 2D transform on one strip.\n\n        Supported keys: `channel`, `start`, `end`, `duration`, `mute`, `lock`,\n        `blend_type`, `blend_alpha`, `volume`, `pan`, `text`, `font_size`, `color`,\n        `location`, caption alignment/style fields, and `transform` containing\n        `offset_x`, `offset_y`, `scale_x`, `scale_y`, `rotation`. Unsupported fields\n        fail with an allowlist. Pass `end` or `duration`, not both.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "updates",
+     "type": "object",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scene",
+     "type": "string",
      "required": false,
      "default": null,
      "description": ""
@@ -9246,6 +9892,13 @@
    "doc": "Insert a keyframe on an object or pose-bone channel."
   },
   {
+   "command": "anim.insert_keyframes_bulk",
+   "module": "anim",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Insert many object, bone and custom-property keys in one undoable call."
+  },
+  {
    "command": "anim.list_actions",
    "module": "anim",
    "mutates": false,
@@ -9307,6 +9960,76 @@
    "mutates": true,
    "needs_gui": false,
    "doc": "Set interpolation/easing on keyframes of matching fcurves."
+  },
+  {
+   "command": "cinematics.add_color_strip",
+   "module": "cinematics",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Add/update a solid-color sequencer background or flash card."
+  },
+  {
+   "command": "cinematics.add_media_strip",
+   "module": "cinematics",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Add/reuse an image, movie or audio strip and optionally its movie audio."
+  },
+  {
+   "command": "cinematics.add_text_strip",
+   "module": "cinematics",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Add/update a title or subtitle strip."
+  },
+  {
+   "command": "cinematics.build_camera_cuts",
+   "module": "cinematics",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Create/update a retry-safe camera-cut plan from named timeline markers."
+  },
+  {
+   "command": "cinematics.list_sequencer_strips",
+   "module": "cinematics",
+   "mutates": false,
+   "needs_gui": false,
+   "doc": "List every Video Sequencer strip in timeline order."
+  },
+  {
+   "command": "cinematics.list_timeline_markers",
+   "module": "cinematics",
+   "mutates": false,
+   "needs_gui": false,
+   "doc": "List timeline markers and derive camera-cut shot ranges."
+  },
+  {
+   "command": "cinematics.remove_sequencer_strips",
+   "module": "cinematics",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Remove explicitly named top-level sequencer strips."
+  },
+  {
+   "command": "cinematics.remove_timeline_markers",
+   "module": "cinematics",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Remove named markers, all camera-cut markers, or explicitly every marker."
+  },
+  {
+   "command": "cinematics.render_animation",
+   "module": "cinematics",
+   "mutates": false,
+   "needs_gui": false,
+   "doc": "Render a final MP4 or PNG sequence from 3D, camera cuts or the sequencer."
+  },
+  {
+   "command": "cinematics.update_strip",
+   "module": "cinematics",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Update timing, compositing, audio, text and transform fields on one strip."
   },
   {
    "command": "describe_api",

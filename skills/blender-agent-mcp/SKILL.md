@@ -24,9 +24,9 @@ description: >-
 ## What this is
 
 An MCP server relays your tool calls over a loopback TCP bridge into a running
-Blender, where they execute on Blender's main thread. 220 tools across 15
+Blender, where they execute on Blender's main thread. 231 tools across 16
 modules: core, objects, mesh, modifiers, sculpt, weights, rig, shading, uv,
-anim, geonodes, settings, properties, io, docs.
+anim, cinematics, geonodes, settings, properties, io, docs.
 
 Most tools work in headless Blender. These need **GUI Blender** with a real 3D
 viewport and fail with a clear message otherwise: all sculpt brush strokes,

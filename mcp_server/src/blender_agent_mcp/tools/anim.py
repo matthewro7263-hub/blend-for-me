@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from ..server import call, clean
 
@@ -52,7 +52,7 @@ def register(mcp) -> None:
         object: Optional[str] = None,
         bone: Optional[str] = None,
         index: int = -1,
-        value: Optional[list[float]] = None,
+        value: Optional[Any] = None,
     ) -> dict:
         """Key a property at a frame, optionally setting its value first.
 
@@ -77,6 +77,37 @@ def register(mcp) -> None:
         return call("anim.insert_keyframe", clean(
             data_path=data_path, frame=frame, object=object, bone=bone,
             index=index, value=value))
+
+    @mcp.tool()
+    def insert_keyframes_bulk(tracks: list[dict[str, Any]]) -> dict:
+        """Animate many objects, bones, channels and custom properties in one call.
+
+        Use this for a complete motion beat instead of making one MCP round trip
+        per key. The whole operation is one Blender undo step.
+
+        Each track requires:
+
+        - `object`: exact object name;
+        - `data_path`: `location`, `rotation_euler`, `scale`, `hide_render`, or a
+          custom property path such as `[\"mouth_open\"]`;
+        - `keys`: `[{"frame": 1, "value": [...]}, ...]`.
+
+        Optional track fields are `bone`, `index` (-1 keys every vector component),
+        `interpolation`, `easing`, and `clear_range: [start,end]`. A key may override
+        `interpolation`/`easing`. Supported interpolation includes `CONSTANT`,
+        `LINEAR`, `BEZIER`, and Blender easing curves. Euler values are radians;
+        quaternion values are `[w,x,y,z]`.
+
+        Custom properties must already exist (create them with
+        `set_custom_property`). Existing keys at the same frame are updated.
+        `clear_range` removes matching channel points first, making generated takes
+        deterministic without deleting unrelated channels.
+
+        Returns per-track action/channel details, requested keys inserted, actual
+        F-Curve points touched (a vector key creates several), and points cleared.
+        One call is capped at 500 tracks / 10,000 requested keys.
+        """
+        return call("anim.insert_keyframes_bulk", {"tracks": tracks}, timeout=120.0)
 
     @mcp.tool()
     def remove_keyframe(

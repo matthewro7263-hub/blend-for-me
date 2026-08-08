@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
 
 import bpy
@@ -11,6 +13,9 @@ from ..registry import command
 
 INTERPOLATIONS = {i.identifier for i in
                   bpy.types.Keyframe.bl_rna.properties["interpolation"].enum_items} \
+    if hasattr(bpy.types, "Keyframe") else set()
+EASINGS = {i.identifier for i in
+           bpy.types.Keyframe.bl_rna.properties["easing"].enum_items} \
     if hasattr(bpy.types, "Keyframe") else set()
 
 
@@ -71,7 +76,51 @@ def _resolve_path(obj, data_path: str, bone: str | None) -> str:
     if bone not in obj.pose.bones:
         raise KeyError(f"{obj.name!r} has no pose bone {bone!r}. "
                        f"Bones: {[b.name for b in obj.pose.bones][:40]}")
-    return f'pose.bones["{bone}"].{data_path}'
+    return obj.pose.bones[bone].path_from_id(data_path)
+
+
+def _anim_target(obj, data_path: str, bone: str | None):
+    """Return (thing to set, local property path, full object keying path)."""
+    full_path = _resolve_path(obj, data_path, bone)
+    target = obj.pose.bones[bone] if bone else obj
+    return target, data_path, full_path
+
+
+def _set_anim_value(target, data_path: str, value, index: int) -> None:
+    """Set a simple RNA attribute or custom property before key insertion."""
+    if data_path.startswith("[") and data_path.endswith("]"):
+        try:
+            key = json.loads(data_path[1:-1])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise ValueError(
+                f"custom property path {data_path!r} must look like '[\"my_prop\"]'"
+            ) from None
+        if not isinstance(key, str) or key not in target:
+            raise KeyError(
+                f"custom property {key!r} does not exist on {target.name!r}; "
+                "create it with set_custom_property before animating it"
+            )
+        if index >= 0:
+            current = list(target[key])
+            current[index] = value
+            target[key] = current
+        else:
+            target[key] = value
+        return
+
+    if "." in data_path or "[" in data_path:
+        raise ValueError(
+            f"setting nested path {data_path!r} is ambiguous. Address the owning "
+            "object/datablock directly, or omit value and key its current value."
+        )
+    if not hasattr(target, data_path):
+        raise AttributeError(f"{target.name!r} has no animatable property {data_path!r}")
+    if isinstance(value, (list, tuple)):
+        setattr(target, data_path, value)
+    elif index >= 0:
+        getattr(target, data_path)[index] = value
+    else:
+        setattr(target, data_path, value)
 
 
 @command("anim.set_frame", mutates=False)
@@ -92,11 +141,22 @@ def set_frame_range(params: dict) -> dict:
         # Assigning these in either order lets Blender clamp one against the
         # other, quietly turning an invalid range into a valid one.
         raise ValueError(f"end ({end}) is before start ({start})")
-
-    scene.frame_start = start
-    scene.frame_end = end
+    step = None
     if params.get("step") is not None:
-        scene.frame_step = int(params["step"])
+        step = int(params["step"])
+        if step < 1:
+            raise ValueError("step must be at least 1")
+
+    # Avoid Blender's cross-clamping when moving a whole valid range beyond the
+    # current one (e.g. 300-400 while the old range ends at 250).
+    if start > scene.frame_end:
+        scene.frame_end = end
+        scene.frame_start = start
+    else:
+        scene.frame_start = start
+        scene.frame_end = end
+    if step is not None:
+        scene.frame_step = step
     return {"start": scene.frame_start, "end": scene.frame_end, "step": scene.frame_step}
 
 
@@ -115,27 +175,16 @@ def set_fps(params: dict) -> dict:
 def insert_keyframe(params: dict) -> dict:
     """Insert a keyframe on an object or pose-bone channel."""
     obj = _object(params.get("object"))
-    data_path = _resolve_path(obj, params["data_path"], params.get("bone"))
+    target, local_path, data_path = _anim_target(
+        obj, params["data_path"], params.get("bone")
+    )
     frame = int(params.get("frame", bpy.context.scene.frame_current))
     index = params.get("index", -1)
 
     if params.get("value") is not None:
         # Set the value first so the key records it, rather than keying whatever
         # happened to be there.
-        value = params["value"]
-        target = obj
-        path = data_path
-        if data_path.startswith("pose.bones["):
-            close = data_path.index("]")
-            bone_name = data_path[len('pose.bones["'):close - 1]
-            target = obj.pose.bones[bone_name]
-            path = data_path[close + 2:]
-        if isinstance(value, (list, tuple)):
-            setattr(target, path, value)
-        elif index is not None and index >= 0:
-            getattr(target, path)[index] = value
-        else:
-            setattr(target, path, value)
+        _set_anim_value(target, local_path, params["value"], int(index))
 
     ok = obj.keyframe_insert(data_path=data_path, frame=frame,
                              index=int(index) if index is not None else -1)
@@ -146,6 +195,192 @@ def insert_keyframe(params: dict) -> dict:
             "'location', 'rotation_euler', 'scale', 'hide_viewport'."
         )
     return {"object": obj.name, "data_path": data_path, "frame": frame, "index": index}
+
+
+@command("anim.insert_keyframes_bulk", mutates=True)
+def insert_keyframes_bulk(params: dict) -> dict:
+    """Insert many object, bone and custom-property keys in one undoable call."""
+    tracks = params["tracks"]
+    if not isinstance(tracks, list) or not tracks:
+        raise ValueError("tracks must be a non-empty list")
+    if len(tracks) > 500:
+        raise ValueError("one bulk animation call is limited to 500 tracks")
+
+    prepared = []
+    total_keys = 0
+    for track_index, track in enumerate(tracks):
+        if not isinstance(track, dict):
+            raise TypeError(f"tracks[{track_index}] must be an object")
+        if not track.get("object"):
+            raise ValueError(f"tracks[{track_index}].object is required")
+        if not isinstance(track.get("data_path"), str) or not track["data_path"]:
+            raise ValueError(f"tracks[{track_index}].data_path is required")
+        obj = _object(track["object"])
+        bone = track.get("bone")
+        target, local_path, full_path = _anim_target(obj, track["data_path"], bone)
+        index = int(track.get("index", -1))
+        keys = track.get("keys")
+        if not isinstance(keys, list) or not keys:
+            raise ValueError(f"tracks[{track_index}].keys must be a non-empty list")
+        total_keys += len(keys)
+        if total_keys > 10_000:
+            raise ValueError("one bulk animation call is limited to 10,000 keys")
+
+        frames = set()
+        normalized_keys = []
+        for key_index, key in enumerate(keys):
+            if not isinstance(key, dict) or "frame" not in key:
+                raise ValueError(f"tracks[{track_index}].keys[{key_index}] needs frame")
+            frame = float(key["frame"])
+            if not math.isfinite(frame):
+                raise ValueError(
+                    f"tracks[{track_index}].keys[{key_index}].frame must be finite"
+                )
+            if frame in frames:
+                raise ValueError(
+                    f"tracks[{track_index}] has duplicate key frame {frame}"
+                )
+            frames.add(frame)
+            if "value" in key:
+                # Validate custom props/attributes before any track mutates.
+                if local_path.startswith("[") and local_path.endswith("]"):
+                    try:
+                        custom_key = json.loads(local_path[1:-1])
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        raise ValueError(
+                            f"custom property path {local_path!r} must look like "
+                            "'[\"my_prop\"]'"
+                        ) from None
+                    if custom_key not in target:
+                        raise KeyError(
+                            f"custom property {custom_key!r} does not exist on "
+                            f"{target.name!r}"
+                        )
+                elif "." in local_path or "[" in local_path:
+                    raise ValueError(
+                        f"setting nested path {local_path!r} is ambiguous; omit value "
+                        "to key its current state or address the owning datablock"
+                    )
+                elif not hasattr(target, local_path):
+                    raise AttributeError(
+                        f"{target.name!r} has no animatable property {local_path!r}"
+                    )
+            interpolation = str(
+                key.get("interpolation", track.get("interpolation", "BEZIER"))
+            ).upper()
+            if interpolation not in INTERPOLATIONS:
+                raise ValueError(
+                    f"tracks[{track_index}].keys[{key_index}] interpolation "
+                    f"{interpolation!r} invalid; valid: {sorted(INTERPOLATIONS)}"
+                )
+            easing = key.get("easing", track.get("easing"))
+            easing = str(easing).upper() if easing else None
+            if easing is not None and easing not in EASINGS:
+                raise ValueError(
+                    f"tracks[{track_index}].keys[{key_index}] easing {easing!r} "
+                    f"invalid; valid: {sorted(EASINGS)}"
+                )
+            normalized_keys.append({
+                "frame": frame,
+                "value": key.get("value"),
+                "has_value": "value" in key,
+                "interpolation": interpolation,
+                "easing": easing,
+            })
+
+        clear_range = track.get("clear_range")
+        if clear_range is not None:
+            if not isinstance(clear_range, (list, tuple)) or len(clear_range) != 2:
+                raise ValueError(
+                    f"tracks[{track_index}].clear_range must be [start, end]"
+                )
+            clear_range = [float(clear_range[0]), float(clear_range[1])]
+            if not all(math.isfinite(value) for value in clear_range):
+                raise ValueError(
+                    f"tracks[{track_index}].clear_range values must be finite"
+                )
+            if clear_range[1] < clear_range[0]:
+                raise ValueError(
+                    f"tracks[{track_index}].clear_range end is before start"
+                )
+        prepared.append({
+            "object": obj, "bone": bone, "target": target,
+            "local_path": local_path, "full_path": full_path, "index": index,
+            "keys": normalized_keys, "clear_range": clear_range,
+        })
+
+    cleared = 0
+    for track in prepared:
+        clear_range = track["clear_range"]
+        if clear_range is None:
+            continue
+        action, slot = _action_of(track["object"])
+        if action is None:
+            continue
+        for fcurve in iter_fcurves(action, slot):
+            if fcurve.data_path != track["full_path"]:
+                continue
+            if track["index"] >= 0 and fcurve.array_index != track["index"]:
+                continue
+            for point in list(fcurve.keyframe_points):
+                if clear_range[0] <= point.co[0] <= clear_range[1]:
+                    fcurve.keyframe_points.remove(point)
+                    cleared += 1
+            fcurve.update()
+
+    inserted = 0
+    track_results = []
+    for track in prepared:
+        obj = track["object"]
+        for key in track["keys"]:
+            if key["has_value"]:
+                _set_anim_value(
+                    track["target"], track["local_path"], key["value"], track["index"]
+                )
+            ok = obj.keyframe_insert(
+                data_path=track["full_path"], frame=key["frame"], index=track["index"]
+            )
+            if not ok:
+                raise RuntimeError(
+                    f"could not key {track['full_path']!r} on {obj.name!r} at "
+                    f"frame {key['frame']}"
+                )
+            inserted += 1
+
+        action, slot = _action_of(obj)
+        touched_points = 0
+        if action is not None:
+            key_settings = {round(key["frame"], 5): key for key in track["keys"]}
+            for fcurve in iter_fcurves(action, slot):
+                if fcurve.data_path != track["full_path"]:
+                    continue
+                if track["index"] >= 0 and fcurve.array_index != track["index"]:
+                    continue
+                for point in fcurve.keyframe_points:
+                    setting = key_settings.get(round(float(point.co[0]), 5))
+                    if setting is None:
+                        continue
+                    point.interpolation = setting["interpolation"]
+                    if setting["easing"]:
+                        point.easing = setting["easing"]
+                    touched_points += 1
+                fcurve.update()
+        track_results.append({
+            "object": obj.name,
+            "bone": track["bone"],
+            "data_path": track["full_path"],
+            "index": track["index"],
+            "keys": len(track["keys"]),
+            "fcurve_points_touched": touched_points,
+            "action": action.name if action else None,
+        })
+
+    return {
+        "tracks": track_results,
+        "track_count": len(track_results),
+        "keys_inserted": inserted,
+        "keyframe_points_cleared": cleared,
+    }
 
 
 @command("anim.remove_keyframe", mutates=True)

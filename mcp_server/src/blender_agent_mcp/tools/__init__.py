@@ -19,6 +19,7 @@ MODULES = (
     "shading",
     "uv",
     "anim",
+    "cinematics",
     "geonodes",
     "settings",
     "properties",

@@ -19,6 +19,7 @@ import pathlib
 import sys
 import tempfile
 import traceback
+import wave
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
@@ -326,6 +327,10 @@ def main() -> None:
     run("anim.set_frame_range", {"start": 1, "end": 24},
         check=lambda r: r["end"] == 24)
     run("anim.set_frame_range", {"start": 50, "end": 10}, expect=ValueError)
+    run("anim.set_frame_range", {"start": 300, "end": 400},
+        check=lambda r: r["start"] == 300 and r["end"] == 400)
+    run("anim.set_frame_range", {"start": 1, "end": 24},
+        check=lambda r: r["start"] == 1 and r["end"] == 24)
     run("anim.set_fps", {"fps": 24}, check=lambda r: r["fps"] == 24)
     run("anim.insert_keyframe", {"object": "Body", "data_path": "location",
                                  "frame": 1, "value": [0, 5, 0]})
@@ -335,7 +340,106 @@ def main() -> None:
         check=lambda r: r["total_keyframes"] >= 6)
     run("anim.set_interpolation", {"object": "Body", "interpolation": "BEZIER"},
         check=lambda r: r["keyframes_changed"] > 0)
+    run("properties.set", {
+        "target_type": "OBJECT", "target": "Body", "key": "anim_weight",
+        "value": 0.0, "description": "Animation control",
+    })
+    bulk_tracks = [
+        {
+            "object": "Body", "data_path": "rotation_euler",
+            "clear_range": [1, 24], "interpolation": "LINEAR",
+            "keys": [
+                {"frame": 1, "value": [0, 0, 0]},
+                {"frame": 12, "value": [0, 0, math.radians(45)]},
+                {"frame": 24, "value": [0, 0, 0], "interpolation": "BEZIER"},
+            ],
+        },
+        {
+            "object": "Body", "data_path": "[\"anim_weight\"]",
+            "keys": [{"frame": 1, "value": 0.0}, {"frame": 24, "value": 1.0}],
+        },
+        {
+            "object": "SmokeRig", "bone": "root", "data_path": "rotation_euler",
+            "keys": [
+                {"frame": 1, "value": [0, 0, 0]},
+                {"frame": 24, "value": [0, math.radians(10), 0]},
+            ],
+        },
+    ]
+    run_bridge("anim.insert_keyframes_bulk", {"tracks": bulk_tracks},
+        check=lambda r: r.get("ok") is True
+        and r["result"]["keys_inserted"] == 7
+        and r["result"]["track_count"] == 3)
+    run("anim.list_keyframes", {"object": "Body"},
+        check=lambda r: any(c["data_path"] == "[\"anim_weight\"]"
+                            for c in r["channels"]))
     run("anim.playblast", {"out_path": os.path.join(TMP, "pb.mp4")})
+
+    section("cinematics + sequencer")
+    run("objects.add_camera", {"name": "ShotWide", "location": [8, -8, 6]})
+    run("objects.add_camera", {"name": "ShotClose", "location": [3, -3, 3]})
+    cuts = [
+        {"name": "SHOT_010", "frame": 1, "camera": "ShotWide"},
+        {"name": "SHOT_020", "frame": 13, "camera": "ShotClose"},
+    ]
+    run("cinematics.build_camera_cuts", {
+        "cuts": cuts, "clear_existing": True, "set_scene_range": True,
+        "frame_end": 24,
+    }, check=lambda r: len(r["shots"]) == 2
+        and r["shots"][0]["end"] == 12 and r["shots"][1]["end"] == 24)
+    run_bridge("cinematics.build_camera_cuts", {"cuts": cuts},
+        check=lambda r: r.get("ok") is True
+        and len(r["result"]["updated"]) == 2)
+    run("cinematics.list_timeline_markers", {},
+        check=lambda r: [shot["camera"] for shot in r["shots"]]
+        == ["ShotWide", "ShotClose"])
+
+    run("cinematics.add_color_strip", {
+        "name": "Slate", "frame_start": 1, "frame_end": 25,
+        "channel": 1, "color": [0.02, 0.03, 0.08],
+    }, check=lambda r: r["strip"]["type"] == "COLOR")
+    run("cinematics.add_media_strip", {
+        "type": "IMAGE", "path": texture_path, "name": "PixelStill",
+        "channel": 2, "frame_start": 1, "duration": 24,
+    }, check=lambda r: r["strip"]["duration"] == 24)
+    run("cinematics.add_text_strip", {
+        "name": "Title", "text": "BLEND FOR ME", "frame_start": 1,
+        "frame_end": 13, "channel": 3, "font_size": 42.0,
+        "location": [0.5, 0.15], "alignment_x": "CENTER",
+        "use_shadow": True, "use_box": True,
+        "box_color": [0.0, 0.0, 0.0, 0.6],
+    }, check=lambda r: r["strip"]["text"] == "BLEND FOR ME")
+
+    audio_path = os.path.join(TMP, "silence.wav")
+    with wave.open(audio_path, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\x00\x00" * 8000)
+    run("cinematics.add_media_strip", {
+        "type": "SOUND", "path": audio_path, "name": "RoomTone",
+        "channel": 4, "frame_start": 1, "volume": 0.25,
+    }, check=lambda r: abs(r["strip"]["volume"] - 0.25) < 1e-6)
+    run("cinematics.update_strip", {
+        "name": "Title", "updates": {
+            "text": "Blend for me", "blend_alpha": 0.9,
+            "transform": {"scale_x": 0.9, "scale_y": 0.9},
+        },
+    }, check=lambda r: r["strip"]["text"] == "Blend for me"
+        and abs(r["strip"]["transform"]["scale_x"] - 0.9) < 1e-6)
+    run("cinematics.list_sequencer_strips", {},
+        check=lambda r: r["count"] >= 4
+        and {"Slate", "PixelStill", "Title", "RoomTone"}
+        <= {strip["name"] for strip in r["strips"]})
+    render_prefix = os.path.join(TMP, "final-")
+    run("cinematics.render_animation", {
+        "out_path": render_prefix, "format": "PNG", "frame_start": 1,
+        "frame_end": 2, "resolution": [32, 32], "percentage": 100,
+        "use_sequencer": True,
+    }, check=lambda r: r["exists"] is True and r["file_count"] == 2
+        and r["bytes"] > 0)
+    run("cinematics.remove_sequencer_strips", {"names": ["RoomTone"]},
+        check=lambda r: r["removed"] == ["RoomTone"])
 
     section("geonodes")
     run("geonodes.create_group", {"name": "SmokeGN"}, check=lambda r: bool(r))

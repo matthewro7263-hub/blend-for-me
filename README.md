@@ -178,7 +178,7 @@ before it commits to an approach.
 
 ## Tool catalog
 
-220 tools across these modules. Every tool carries a docstring covering
+231 tools across these modules. Every tool carries a docstring covering
 what it does, when to use it instead of an alternative, parameter units, and its
 gotchas — that documentation is the interface agents actually read.
 
@@ -193,7 +193,8 @@ gotchas — that documentation is the interface agents actually read.
 | `rig` | armature creation, edit/pose bones, constraints, IK setup, mesh parenting, shape keys, drivers, bone collections |
 | `shading` | PBR materials, retry-safe batch node graphs, Color Ramps, generated/custom image textures, viewport shading, baking |
 | `uv` | seams, unwrap, smart project, pack islands, UV stats |
-| `anim` | frames, fps, keyframes, interpolation, actions, NLA, playblast |
+| `anim` | frames, fps, single/bulk object, bone and custom-property keys, interpolation, actions, NLA, playblast |
+| `cinematics` | shot markers and camera cuts, Video Sequencer image/movie/audio/text/color editing, final MP4/PNG animation renders |
 | `geonodes` | geometry-nodes modifier and node-group construction |
 | `settings` | persistent render/output, color management, units and World lighting |
 | `properties` | custom ID properties for metadata, rig controls and driver inputs |

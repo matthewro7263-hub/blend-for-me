@@ -4389,7 +4389,7 @@ uv_stats(object="Hull", uv_layer="UVMap")
 
 ## anim
 
-11 tools. Frames, keyframes, interpolation, actions, NLA and OpenGL playblasts.
+12 tools. Frames, single/bulk object, bone and custom-property keys, interpolation, actions, NLA and OpenGL playblasts.
 
 ### assign_action
 
@@ -4434,6 +4434,34 @@ Gotchas:
 
 ```python
 insert_keyframe(data_path="rotation_euler", frame=24, object="Rig", bone="forearm.L", index=-1, value=[-0.6109, 0, 0])
+```
+
+### insert_keyframes_bulk
+
+Animate many objects, pose bones, channels and custom properties in one undoable call.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `tracks` | array | track specs with `object`, `data_path`, and `keys` | — | yes |
+
+Each track accepts `bone`, component `index`, default `interpolation` / `easing`, and `clear_range: [start,end]`. Keys are `{frame, value}` with optional interpolation/easing overrides. A custom property path looks like `["mouth_open"]` and must already exist.
+
+Returns: `{tracks, track_count, keys_inserted, keyframe_points_cleared}`; each track reports its action and actual F-Curve points touched. A vector key inserts one requested key but touches multiple curves.
+
+Gotchas:
+
+- Euler rotation values are RADIANS; quaternion values are `[w,x,y,z]`.
+- `clear_range` deletes only the matching channel/index before insertion, preserving unrelated animation.
+- Named custom properties must be created first with `set_custom_property`.
+- One call is capped at 500 tracks / 10,000 requested keys.
+
+```python
+insert_keyframes_bulk(tracks=[
+    {"object": "Hero", "data_path": "location", "interpolation": "BEZIER",
+     "keys": [{"frame": 1, "value": [0,0,0]}, {"frame": 24, "value": [0,0,2]}]},
+    {"object": "Hero", "data_path": "[\"mouth_open\"]",
+     "keys": [{"frame": 1, "value": 0.0}, {"frame": 8, "value": 1.0}]},
+])
 ```
 
 ### list_actions
@@ -4621,6 +4649,195 @@ Gotchas:
 
 ```python
 set_interpolation(interpolation="BEZIER", easing="EASE_IN_OUT", object="Rig", frame_range=[1, 48])
+```
+
+---
+
+## cinematics
+
+10 tools. Camera-cut shot planning, Video Sequencer editing, captions/titles and final headless animation rendering.
+
+### add_color_strip
+
+Create or update a solid RGB background, slate, flash or transition card.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `name` | string | stable strip name | — | yes |
+| `frame_start` | integer | first visible frame | — | yes |
+| `frame_end` | integer | exclusive visible end | — | yes |
+| `color` | array | `[R,G,B]` 0-1 | none | no |
+| `scene` | string | scene name; current scene when omitted | none | no |
+| `channel` | integer | sequencer layer, 1-128 | `1` | no |
+
+Returns `{scene, created, reused, strip}`. Same-name COLOR strips update safely.
+
+```python
+add_color_strip(name="Black", frame_start=1, frame_end=73, color=[0,0,0], channel=1)
+```
+
+### add_media_strip
+
+Add or safely reuse an image, movie or sound in the Video Sequencer.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `type` | string | `IMAGE`, `MOVIE`, or `SOUND` | — | yes |
+| `path` | string | existing local media path | — | yes |
+| `name` | string | stable strip name; filename when omitted | none | no |
+| `scene` | string | scene name | none | no |
+| `channel` | integer | layer, 1-128 | `1` | no |
+| `frame_start` | integer | first visible frame | `1` | no |
+| `frame_end` | integer | exclusive end; mutually exclusive with duration | none | no |
+| `duration` | integer | visible frame count | none | no |
+| `fit_method` | string | `FIT`, `FILL`, `STRETCH`, etc. | `FIT` | no |
+| `volume` | number | audio gain | none | no |
+| `pan` | number | audio stereo pan | none | no |
+| `add_audio` | boolean | make paired audio for a MOVIE | `false` | no |
+| `audio_channel` | integer | paired movie-audio layer | none | no |
+| `reuse_existing` | boolean | reuse matching name/type/source on retry | `true` | no |
+
+Returns `{scene, created, reused, strip, audio_strip}`.
+
+Gotchas:
+
+- Blender movie strips contain video only; use `add_audio=true` for their sound stream.
+- A same-name strip pointing at another source is refused rather than silently replacing an edit.
+- Higher channels composite over lower channels.
+
+```python
+add_media_strip(type="MOVIE", path="/show/shot010.mp4", name="SHOT_010", channel=2, frame_start=1, add_audio=True)
+```
+
+### add_text_strip
+
+Create/update a title, lower-third, caption or subtitle strip.
+
+Required params are `name`, `text`, `frame_start`, and exclusive `frame_end`. Optional controls include scene/channel, font size, RGBA color, normalized location, horizontal alignment and anchors, wrapping, bold/italic, plus complete shadow/outline/box colors and widths.
+
+Returns `{scene, created, reused, strip}`. Reusing a TEXT name updates it, so generated subtitle passes are retry-safe.
+
+```python
+add_text_strip(name="SUB_001", text="We need to go.", frame_start=48, frame_end=92, channel=5, font_size=42, location=[0.5,0.1], alignment_x="CENTER", use_shadow=True)
+```
+
+### build_camera_cuts
+
+Build a named multi-camera shot plan from timeline markers.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `cuts` | array | `{name, frame, camera}` specs | — | yes |
+| `scene` | string | scene name | none | no |
+| `clear_existing` | boolean | remove existing camera markers first | `false` | no |
+| `set_scene_range` | boolean | move scene start to first cut | `false` | no |
+| `frame_end` | integer | final scene/render frame | none | no |
+
+Returns created/updated/removed markers, active camera and derived shot ranges. Blender switches cameras automatically as the playhead crosses each bound marker.
+
+```python
+build_camera_cuts(cuts=[{"name":"SHOT_010","frame":1,"camera":"Wide"}, {"name":"SHOT_020","frame":73,"camera":"Close"}], set_scene_range=True, frame_end=144)
+```
+
+### list_sequencer_strips
+
+List sequencer strips in timeline order with timing, source, blend, audio, text and transform state.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `scene` | string | scene name | none | no |
+| `limit` | integer | maximum returned entries | `1000` | no |
+
+Returns `{scene, count, strips, truncated}`. Nested Meta contents are visible, though mutation tools intentionally address only top-level strips.
+
+```python
+list_sequencer_strips(limit=200)
+```
+
+### list_timeline_markers
+
+List plain production markers and derive effective camera-cut shot ranges.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `scene` | string | scene name | none | no |
+
+Returns `{scene, frame_start, frame_end, markers, shots}`; each shot ends immediately before the next camera marker, with the final shot ending at the scene end.
+
+```python
+list_timeline_markers()
+```
+
+### remove_sequencer_strips
+
+Remove explicitly named top-level sequencer strips.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `names` | array | exact strip names | — | yes |
+| `scene` | string | scene name | none | no |
+
+Returns `{scene, removed, missing, remaining}`. Missing names make cleanup safely retryable; there is no implicit clear-all.
+
+```python
+remove_sequencer_strips(names=["Temp Slate", "Old Audio"])
+```
+
+### remove_timeline_markers
+
+Remove named markers, all camera cuts, or explicitly every marker.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `names` | array | marker names | none | no |
+| `scene` | string | scene name | none | no |
+| `camera_only` | boolean | remove camera-bound markers, preserve plain cues | `false` | no |
+| `remove_all` | boolean | explicitly remove every marker | `false` | no |
+
+A blank call refuses to do anything. Returns removed/missing names and remaining count.
+
+```python
+remove_timeline_markers(camera_only=True)
+```
+
+### render_animation
+
+Render final camera-cut animation or the edited sequencer to MP4/PNG.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `out_path` | string | MP4 destination or PNG filename prefix | — | yes |
+| `scene` | string | scene name | none | no |
+| `format` | string | `MP4` (MPEG-4/H.264) or `PNG` sequence | `MP4` | no |
+| `frame_start` / `frame_end` | integer | temporary render range | none | no |
+| `resolution` | array | `[width,height]` pixels | none | no |
+| `percentage` | integer | resolution percentage | `100` | no |
+| `fps` / `fps_base` | number | temporary frame rate | none | no |
+| `engine` | string | temporary render engine identifier | none | no |
+| `samples` | integer | temporary Cycles/available engine samples | none | no |
+| `use_sequencer` | boolean | render VSE edit rather than raw 3D | `true` | no |
+| `timeout` | number | bridge wait, seconds | `3600.0` | no |
+
+Returns verified paths, file/byte counts, frame range, resolution and FPS. Settings are restored afterward. Unlike GUI-only `playblast`, this is the real headless render pipeline.
+
+```python
+render_animation(out_path="/show/episode01.mp4", format="MP4", frame_start=1, frame_end=17280, resolution=[1920,1080], use_sequencer=True, timeout=7200)
+```
+
+### update_strip
+
+Update one strip's timing, compositing, audio, text/style or 2D transform.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `name` | string | exact top-level strip name | — | yes |
+| `updates` | object | allowlisted settings | — | yes |
+| `scene` | string | scene name | none | no |
+
+Timing keys are `start`, `end` or `duration`; compositing includes channel/blend/alpha/mute/lock; audio includes volume/pan; text styling is supported; `transform` accepts offsets, scales and rotation. Unknown fields fail with the live allowlist.
+
+```python
+update_strip(name="SHOT_010", updates={"start": 1, "end": 73, "blend_alpha": 1.0, "transform": {"scale_x": 1.05, "scale_y": 1.05}})
 ```
 
 ---
