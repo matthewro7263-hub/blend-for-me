@@ -700,3 +700,173 @@ def register(mcp) -> None:
         """
         return call("objects.collection_list",
                     clean(limit=limit, names_per_collection=names_per_collection))
+
+    register_viewpoint_tools(mcp)
+
+
+def register_viewpoint_tools(mcp) -> None:
+    """Aiming, framing, and editing lights/cameras after creation."""
+
+    @mcp.tool()
+    def aim_at(
+        object: str,
+        target: Union[str, list[float]],
+        use_bounds: bool = True,
+    ) -> dict:
+        """Point a camera, light or any object at a target. No trig required.
+
+        Rotates `object` so its local -Z axis (the direction cameras and spot
+        lights look) points at `target`.
+
+        Args:
+            object: The object to rotate.
+            target: An object name, or an [x, y, z] world-space point.
+            use_bounds: When `target` is an object name, aim at the centre of its
+                bounding box rather than its origin. Usually what you want — an
+                origin often sits at a corner or on the floor.
+
+        Sets `rotation_mode` to XYZ and returns the resulting euler in radians.
+        Use this instead of deriving the rotation yourself; the sign conventions
+        are easy to get subtly wrong and the error is hard to spot.
+        """
+        return call("objects.aim_at", clean(
+            object=object, target=target, use_bounds=use_bounds))
+
+    @mcp.tool()
+    def frame_object(
+        target: str,
+        camera: Optional[str] = None,
+        margin: float = 1.25,
+        direction: Optional[list[float]] = None,
+        make_active: bool = True,
+    ) -> dict:
+        """Place and aim a camera so a target object fills the frame.
+
+        The fastest way to actually see something. There is **no orbit/pan/zoom
+        tool**, so positioning a camera is the only way to view a subject from a
+        chosen angle; this makes it one call.
+
+        Args:
+            target: Object to frame.
+            camera: Camera to move. Defaults to the scene camera; errors if
+                there is none (create one with `add_camera`).
+            margin: Padding factor. 1.0 fits the bounding sphere exactly; 1.25
+                (default) leaves comfortable space. Below 1.0 crops.
+            direction: [x, y, z] direction **from** the object **to** the camera,
+                normalised internally. Default `[0, -1, 0.35]` is a front
+                three-quarter view slightly above. Try `[1, -1, 0.5]` for a
+                corner view, `[0, 0, 1]` for top-down.
+            make_active: Make it the scene camera, so `render_frame` and
+                `viewport_screenshot(camera_view=True)` use it.
+
+        Accounts for the render aspect ratio, so a portrait output frames
+        correctly. Then screenshot with `camera_view=True` to see the result.
+        """
+        return call("objects.frame_object", clean(
+            target=target, camera=camera, margin=margin, direction=direction,
+            make_active=make_active))
+
+    @mcp.tool()
+    def set_camera(
+        camera: str,
+        lens: Optional[float] = None,
+        type: Optional[str] = None,
+        ortho_scale: Optional[float] = None,
+        clip_start: Optional[float] = None,
+        clip_end: Optional[float] = None,
+        shift_x: Optional[float] = None,
+        shift_y: Optional[float] = None,
+        dof_distance: Optional[float] = None,
+        dof_object: Optional[str] = None,
+        fstop: Optional[float] = None,
+        use_dof: Optional[bool] = None,
+        make_active: bool = False,
+    ) -> dict:
+        """Change an existing camera's settings.
+
+        Args:
+            lens: Focal length in **millimetres**. 50 is neutral, 24 wide, 85+
+                flattering for portraits and product shots.
+            type: PERSP, ORTHO or PANO.
+            ortho_scale: Viewport width in world units, for ORTHO cameras.
+            clip_start / clip_end: Near/far clip in world units. Geometry outside
+                this range vanishes — a common cause of "my object disappeared".
+            dof_object: Focus on this object; enables depth of field.
+            fstop: Aperture. Lower is shallower — 1.4 is very shallow, 8 deep.
+
+        Setting any DOF parameter enables DOF automatically.
+        """
+        return call("objects.set_camera", clean(
+            camera=camera, lens=lens, type=type, ortho_scale=ortho_scale,
+            clip_start=clip_start, clip_end=clip_end, shift_x=shift_x,
+            shift_y=shift_y, dof_distance=dof_distance, dof_object=dof_object,
+            fstop=fstop, use_dof=use_dof, make_active=make_active))
+
+    @mcp.tool()
+    def set_light(
+        light: str,
+        energy: Optional[float] = None,
+        color: Optional[list[float]] = None,
+        type: Optional[str] = None,
+        size: Optional[float] = None,
+        use_shadow: Optional[bool] = None,
+        spot_size: Optional[float] = None,
+        spot_blend: Optional[float] = None,
+    ) -> dict:
+        """Change an existing light. Use this to tune lighting instead of re-creating it.
+
+        Args:
+            energy: Power in **watts** for POINT/SPOT/AREA; **irradiance
+                (W/m²)** for SUN, where sensible values are around 1-5, not
+                hundreds. This trips people up constantly.
+            color: [r, g, b], each 0-1.
+            type: POINT, SUN, SPOT or AREA.
+            size: Softness/extent. Radius in world units for POINT/SPOT, edge
+                length for AREA, and **angular diameter in radians** for SUN
+                (0.00918 ≈ the real sun). Bigger means softer shadows.
+            spot_size: Cone angle in **radians**, SPOT only.
+            spot_blend: 0-1 softness of the cone edge.
+
+        The result reports which property `size` was written to, since it differs
+        per light type.
+        """
+        return call("objects.set_light", clean(
+            light=light, energy=energy, color=color, type=type, size=size,
+            use_shadow=use_shadow, spot_size=spot_size, spot_blend=spot_blend))
+
+    @mcp.tool()
+    def set_object_visibility(
+        object: str,
+        hide_viewport: Optional[bool] = None,
+        hide_render: Optional[bool] = None,
+        camera: Optional[bool] = None,
+        diffuse: Optional[bool] = None,
+        glossy: Optional[bool] = None,
+        transmission: Optional[bool] = None,
+        volume_scatter: Optional[bool] = None,
+        shadow: Optional[bool] = None,
+    ) -> dict:
+        """Control viewport/render visibility and per-ray visibility.
+
+        The ray flags matter more than they sound. Emissive geometry placed
+        inside or around a light — a bulb mesh, a screen, neon, fire — will
+        **block that light's own output** because the mesh casts shadows onto
+        everything. The render comes back dark with no error to react to. The fix
+        is `shadow=False` on the emissive object.
+
+        Args:
+            hide_viewport / hide_render: Hide entirely from the viewport or the
+                final render.
+            camera: Visible to camera rays — set False to make an object light
+                the scene without appearing in it.
+            shadow: Whether the object casts shadows. Turn off for bulb meshes
+                and other emissive geometry wrapped around a light.
+            diffuse / glossy / transmission / volume_scatter: Contribution to
+                each ray type. Cycles only; EEVEE ignores them and the result
+                reports which were unsupported.
+        """
+        return call("objects.set_visibility", clean(
+            object=object, hide_viewport=hide_viewport, hide_render=hide_render,
+            camera=camera, diffuse=diffuse, glossy=glossy,
+            transmission=transmission, volume_scatter=volume_scatter,
+            shadow=shadow))

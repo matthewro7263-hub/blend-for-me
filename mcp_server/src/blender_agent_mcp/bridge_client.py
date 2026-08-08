@@ -92,6 +92,10 @@ class BridgeClient:
              timeout: float = DEFAULT_TIMEOUT) -> Any:
         """Send one command and return its ``result``.
 
+        ``timeout`` travels to Blender as a reserved ``_timeout`` parameter so the
+        bridge can bound its own main-thread wait; it is never passed to the
+        handler and never counts as an unknown parameter.
+
         Raises:
             NotConnected: the bridge could not be reached (actionable message).
             BridgeError: the command ran in Blender and failed there.

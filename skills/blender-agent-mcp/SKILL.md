@@ -249,6 +249,38 @@ Order that matters, and burns people who get it wrong:
 - UV unwrap **before** baking.
 - Weight cleanup **before** posing for review, or you debug the wrong thing.
 
+## Sharp edges worth knowing before you hit them
+
+**Parameter names are not uniform across modules.** `mesh.*` tools take `name`;
+most others take `object`; batch tools take `names`. An unrecognised key is now a
+hard error that lists the accepted ones — it used to fall back to the active
+object and report on the wrong thing. If you get that error, read the list it
+gives you rather than guessing again.
+
+**`_timeout` is reserved.** Every request carries it so the bridge can bound its
+own wait; you never pass it yourself. When a call times out, the message names
+the budget it used — raise the tool's `timeout` argument if it has one (see
+above), never add `_timeout`.
+
+**To look at something, use `frame_object`.** There is no orbit/pan/zoom tool, so
+a camera is your only way to choose a viewpoint. `frame_object(target=...)`
+positions and aims in one call and accounts for aspect ratio; `aim_at` rotates
+an existing object at a target. Do not derive the euler yourself — the sign
+conventions are easy to invert and the mistake is invisible.
+
+**Emissive geometry inside a light blocks that light.** A bulb mesh around a
+point lamp casts shadows over the whole scene and the render comes back dark
+with no error. Clear it with
+`set_object_visibility(object="Bulb", shadow=False)`.
+
+**Sockets can share a name.** `ShaderNodeMix` has four inputs called `A` (one per
+data type). Passing the name writes the first and returns an `ambiguous` warning
+naming the indices; pass the integer index to target a specific one.
+
+**Check `blank` on a render.** `render_frame` returns a `content` record; when
+`blank` is true the frame is empty or a flat colour — usually nothing in frame,
+or no light. A transparent render is otherwise reported as a success.
+
 ## Reference router
 
 Open these — do not work from memory.

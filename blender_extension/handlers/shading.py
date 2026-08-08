@@ -138,7 +138,12 @@ def _apply_prop(node, prop: str, value) -> dict:
     Returns a small record of what was actually written so the caller can tell
     the agent which of the two interpretations applied.
     """
-    rna = node.bl_rna.properties.get(prop)
+    # `bl_rna.properties` is a bpy_prop_collection keyed by string; calling
+    # .get() with an int raises SystemError rather than returning None. An
+    # integer `prop` is always a socket index anyway — nodes like ShaderNodeMix
+    # have several sockets sharing a name, so an index is the only way to
+    # address them unambiguously.
+    rna = node.bl_rna.properties.get(prop) if isinstance(prop, str) else None
     if rna is not None and not rna.is_readonly:
         if rna.type == "POINTER" and isinstance(value, str):
             fixed = rna.fixed_type.identifier
@@ -179,8 +184,19 @@ def _apply_prop(node, prop: str, value) -> dict:
         sock.default_value = seq
     else:
         sock.default_value = value
-    return {"target": "socket", "socket": sock.name, "linked": sock.is_linked,
-            "value": _socket_value(sock)}
+    index = next((i for i, s in enumerate(node.inputs) if s == sock), None)
+    duplicates = [i for i, s in enumerate(node.inputs) if s.name == sock.name]
+    record = {"target": "socket", "socket": sock.name, "socket_index": index,
+              "linked": sock.is_linked, "value": _socket_value(sock)}
+    if isinstance(prop, str) and len(duplicates) > 1:
+        # ShaderNodeMix and friends repeat socket names per data type; a name
+        # match silently picks the first, which is rarely the one meant.
+        record["ambiguous"] = (
+            f"{len(duplicates)} input sockets are named {sock.name!r} "
+            f"(indices {duplicates}); wrote index {index}. Pass the integer "
+            f"index instead if you meant a different one."
+        )
+    return record
 
 
 def _stack_left(tree, node, anchor, column: int) -> None:

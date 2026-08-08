@@ -394,10 +394,141 @@ Returns: `{name, type, location, rotation_euler, scale, dimensions, collections}
 Gotchas:
 
 - A camera with zero rotation looks straight DOWN (-Z). To look horizontally from the front use `rotation=[1.5708, 0, 0]`.
-- This does not aim at anything. Read `object_bounds` and compute the rotation, or add a Track To constraint.
+- This does not aim at anything by itself — use `aim_at` afterwards, or skip both and use `frame_object`, which positions AND aims in one call.
 
 ```python
 add_camera(location=[0, -4.0, 1.6], rotation=[1.4835, 0, 0], lens=50.0, clip_end=200.0)
+```
+
+### aim_at
+
+Rotate an object so its local -Z axis points at a target. No trigonometry needed.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `object` | string | object to rotate | none | **yes** |
+| `target` | string \| array | object name, or `[x, y, z]` world point | none | **yes** |
+| `use_bounds` | boolean | aim at the target's bounding-box centre rather than its origin | `true` | no |
+
+Returns: `{object, aimed_at, rotation_euler}` — euler in RADIANS.
+
+Gotchas:
+
+- -Z is the direction cameras and spot lights look; for other objects "forward" may not be -Z.
+- Sets `rotation_mode` to `XYZ`, overwriting a quaternion rotation mode.
+- Aiming at an object's *origin* is often wrong — origins sit at corners or on the floor. Leave `use_bounds` true.
+
+```python
+aim_at(object="Key_Light", target="Lamp_Shade")
+aim_at(object="Cam", target=[0.0, 0.0, 1.2])
+```
+
+### frame_object
+
+Place AND aim a camera so a target fills the frame. The fastest way to see something.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `target` | string | object to frame | none | **yes** |
+| `camera` | string | camera to move; defaults to the scene camera | none | no |
+| `margin` | number | padding factor; 1.0 fits exactly, <1.0 crops | `1.25` | no |
+| `direction` | array | `[x, y, z]` direction FROM object TO camera, normalised internally | `[0, -1, 0.35]` | no |
+| `make_active` | boolean | set as `scene.camera` | `true` | no |
+
+Returns: `{camera, target, location, rotation_euler, distance, bounds_radius, focal_length_mm, is_scene_camera}`.
+
+**vs:** `add_camera` + `aim_at` is two calls and leaves you to compute distance. Use `frame_object` unless you need an exact camera position.
+
+Gotchas:
+
+- Errors when no `camera` is given and the scene has none — `add_camera` first.
+- Accounts for the render aspect ratio, so it frames correctly for portrait output. Change resolution BEFORE framing.
+- Fits the bounding **sphere**, so a long thin object leaves space at the sides.
+- Follow with `viewport_screenshot(camera_view=True)` to see the result.
+
+```python
+frame_object(target="Lamp_Shade", camera="Cam", margin=1.3, direction=[1.0, -1.0, 0.5])
+```
+
+### set_camera
+
+Change an existing camera's lens, type, clipping and depth of field.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `camera` | string | camera object name | none | **yes** |
+| `lens` | number | focal length in MILLIMETRES | none | no |
+| `type` | string | `PERSP`, `ORTHO`, `PANO` | none | no |
+| `ortho_scale` | number | viewport width in world units (ORTHO only) | none | no |
+| `clip_start` / `clip_end` | number | near/far clip, world units | none | no |
+| `shift_x` / `shift_y` | number | lens shift, fraction of sensor | none | no |
+| `dof_distance` | number | focus distance, world units | none | no |
+| `dof_object` | string | object to focus on | none | no |
+| `fstop` | number | aperture; lower is shallower | none | no |
+| `use_dof` | boolean | enable/disable depth of field | none | no |
+| `make_active` | boolean | set as `scene.camera` | `false` | no |
+
+Returns: `{camera, type, lens, clip_start, clip_end, use_dof, focus_distance, aperture_fstop, is_scene_camera}`.
+
+Gotchas:
+
+- Setting any DOF parameter enables DOF automatically.
+- Geometry nearer than `clip_start` or beyond `clip_end` silently vanishes — a very common cause of "my object disappeared from the render".
+
+```python
+set_camera(camera="Cam", lens=85.0, fstop=2.8, dof_object="Lamp_Shade")
+```
+
+### set_light
+
+Change an existing light. Tune lighting with this rather than deleting and re-creating.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `light` | string | light object name | none | **yes** |
+| `energy` | number | WATTS for POINT/SPOT/AREA; **irradiance W/m² for SUN** | none | no |
+| `color` | array | `[r, g, b]`, each 0-1 | none | no |
+| `type` | string | `POINT`, `SUN`, `SPOT`, `AREA` | none | no |
+| `size` | number | radius (POINT/SPOT), edge length (AREA), **angular diameter in RADIANS (SUN)** | none | no |
+| `use_shadow` | boolean | whether the light casts shadows | none | no |
+| `spot_size` | number | cone angle in RADIANS, SPOT only | none | no |
+| `spot_blend` | number | 0-1 cone edge softness | none | no |
+
+Returns: `{light, type, energy, color, use_shadow}` plus `size_field` naming the property `size` was written to.
+
+Gotchas:
+
+- SUN energy is irradiance: sensible values are ~1-5, NOT the hundreds of watts a point light needs. This is the most common lighting mistake.
+- `size` maps to a different property per light type; the result tells you which one was written.
+- Bigger `size` means softer shadows and a dimmer-looking key at the same energy.
+
+```python
+set_light(light="Bulb", energy=60.0, color=[1.0, 0.85, 0.7], size=0.05)
+```
+
+### set_object_visibility
+
+Viewport/render visibility plus per-ray visibility flags.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `object` | string | object name | none | **yes** |
+| `hide_viewport` | boolean | hide in the viewport | none | no |
+| `hide_render` | boolean | exclude from renders | none | no |
+| `camera` | boolean | visible to camera rays | none | no |
+| `shadow` | boolean | casts shadows | none | no |
+| `diffuse` / `glossy` / `transmission` / `volume_scatter` | boolean | contribution per ray type | none | no |
+
+Returns: `{object, applied, ray_visibility, hide_viewport, hide_render}` and `unsupported` for flags the engine lacks.
+
+Gotchas:
+
+- **Emissive geometry inside a light blocks that light.** A bulb mesh around a point light casts shadows onto the whole scene and the render comes back dark with no error. Fix with `shadow=False` on the bulb.
+- `camera=False` makes an object light the scene without appearing in it — the standard trick for softboxes and practical lights.
+- Ray flags are Cycles-only; EEVEE ignores them and reports them in `unsupported`.
+
+```python
+set_object_visibility(object="Bulb_Mesh", shadow=False, camera=True)
 ```
 
 ### add_empty

@@ -83,6 +83,22 @@ def _execute(job: _Job) -> dict:
         )
 
     meta = registry.META.get(job.cmd, {})
+
+    # An unrecognised key is nearly always a wrong-parameter-name mistake, and
+    # handlers that fall back to the active object would otherwise act on the
+    # wrong one and report success. Fail loudly instead.
+    accepted = meta.get("params")
+    if accepted:
+        allowed = set(accepted) | {"_timeout"}
+        unknown = sorted(k for k in job.params if k not in allowed)
+        if unknown:
+            return protocol.err(
+                job.msg_id,
+                f"{job.cmd} does not accept {unknown}. Accepted parameters: "
+                f"{sorted(accepted)}. (The object-identifying key is not uniform "
+                f"across modules — mesh.* uses 'name', most others use 'object'.)",
+            )
+
     if meta.get("mutates"):
         # Push an undo step *before* mutating so the agent can always step back.
         try:
@@ -307,7 +323,12 @@ class _BridgeServer:
             response = protocol.err(
                 msg_id,
                 f"timed out after {wait:.0f}s waiting for Blender's main thread. "
-                "Blender may be busy (modal operator, render, or a blocking dialog).",
+                f"That budget comes from the request's '_timeout' parameter "
+                f"({timeout:.0f}s, default {protocol.DEFAULT_TIMEOUT:.0f}s) plus a "
+                f"5s grace period — for a genuinely slow operation, raise it "
+                f"rather than retrying. If the command should have been fast, "
+                f"Blender is busy: a modal operator, a render, or a blocking "
+                f"dialog is holding the main thread.",
             )
         self._send(conn, response)
 

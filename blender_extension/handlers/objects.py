@@ -923,3 +923,235 @@ def collection_list(params: dict) -> dict:
         "truncated": len(rows) > limit,
         "unlinked_collections": unlinked[:limit],
     }
+
+
+# ---------------------------------------------------------------------------
+# aiming, and editing lights/cameras after creation
+# ---------------------------------------------------------------------------
+
+def _aim_euler(from_co, to_co):
+    """Euler rotation that points a camera/light's -Z axis at ``to_co``.
+
+    Blender cameras look down local -Z with +Y up, so the usual track-to maths
+    applies. Returned as an XYZ euler in radians.
+    """
+    direction = Vector(to_co) - Vector(from_co)
+    if direction.length < 1e-9:
+        raise ValueError("cannot aim: the object and its target are at the same point")
+    # to_track_quat handles the -Z forward / +Y up convention for us; deriving
+    # the euler by hand is where sign conventions get silently reversed.
+    return direction.to_track_quat("-Z", "Y").to_euler()
+
+
+@command("objects.aim_at", mutates=True)
+def aim_at(params: dict) -> dict:
+    """Rotate an object so its -Z axis points at a target point or object."""
+    obj = _obj(params["object"])
+
+    target = params.get("target")
+    if target is None:
+        raise ValueError("'target' is required: an object name or an [x, y, z] point")
+    if isinstance(target, str):
+        other = bpy.data.objects.get(target)
+        if other is None:
+            raise KeyError(f"no object named {target!r} to aim at")
+        point = _bounds_center_world(other) if params.get("use_bounds", True) \
+            else other.matrix_world.translation
+    else:
+        point = Vector(_vec3(target, "target"))
+
+    obj.rotation_mode = "XYZ"
+    obj.rotation_euler = _aim_euler(obj.matrix_world.translation, point)
+    bpy.context.view_layer.update()
+    return {"object": obj.name, "aimed_at": list(point),
+            "rotation_euler": list(obj.rotation_euler)}
+
+
+def _bounds_center_world(obj):
+    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    return sum(corners, Vector()) / 8.0
+
+
+@command("objects.frame_object", mutates=True)
+def frame_object(params: dict) -> dict:
+    """Place a camera so a target object fills the frame, and aim it at the object."""
+    import math
+
+    target = _obj(params["target"])
+    cam_name = params.get("camera")
+    if cam_name:
+        cam = _obj(cam_name)
+        if cam.type != "CAMERA":
+            raise TypeError(f"{cam.name!r} is a {cam.type}, not a CAMERA")
+    else:
+        cam = bpy.context.scene.camera
+        if cam is None:
+            raise RuntimeError(
+                "no camera given and the scene has none. Create one with "
+                "objects.add_camera first."
+            )
+
+    corners = [target.matrix_world @ Vector(c) for c in target.bound_box]
+    center = sum(corners, Vector()) / 8.0
+    radius = max((c - center).length for c in corners) or 1.0
+
+    # Fit the bounding sphere inside the narrower of the two FOVs, with margin.
+    render = bpy.context.scene.render
+    fov = cam.data.angle
+    aspect = (render.resolution_x * render.pixel_aspect_x) / \
+             max(1e-9, render.resolution_y * render.pixel_aspect_y)
+    if aspect < 1.0:
+        fov = 2.0 * math.atan(math.tan(fov / 2.0) * aspect)
+    margin = float(params.get("margin", 1.25))
+    distance = (radius * margin) / max(1e-6, math.sin(fov / 2.0))
+
+    direction = params.get("direction", [0.0, -1.0, 0.35])
+    offset = Vector(_vec3(direction, "direction"))
+    if offset.length < 1e-9:
+        raise ValueError("'direction' must not be the zero vector")
+    offset.normalize()
+
+    cam.location = center + offset * distance
+    cam.rotation_mode = "XYZ"
+    cam.rotation_euler = _aim_euler(cam.location, center)
+    if params.get("make_active", True):
+        bpy.context.scene.camera = cam
+    bpy.context.view_layer.update()
+
+    return {"camera": cam.name, "target": target.name,
+            "location": list(cam.location), "rotation_euler": list(cam.rotation_euler),
+            "distance": distance, "bounds_radius": radius,
+            "focal_length_mm": cam.data.lens, "is_scene_camera": bpy.context.scene.camera == cam}
+
+
+@command("objects.set_camera", mutates=True)
+def set_camera(params: dict) -> dict:
+    """Edit an existing camera's lens, type, clipping and DOF."""
+    obj = _obj(params["camera"])
+    if obj.type != "CAMERA":
+        raise TypeError(f"{obj.name!r} is a {obj.type}, not a CAMERA")
+    cam = obj.data
+
+    if params.get("type") is not None:
+        cam.type = _enum(params["type"], _type_enum("Camera", "type"), "type")
+    for key, attr, cast in (("lens", "lens", float),
+                            ("ortho_scale", "ortho_scale", float),
+                            ("clip_start", "clip_start", float),
+                            ("clip_end", "clip_end", float),
+                            ("shift_x", "shift_x", float),
+                            ("shift_y", "shift_y", float)):
+        if params.get(key) is not None:
+            setattr(cam, attr, cast(params[key]))
+
+    if params.get("dof_distance") is not None:
+        cam.dof.use_dof = True
+        cam.dof.focus_distance = float(params["dof_distance"])
+    if params.get("dof_object") is not None:
+        cam.dof.use_dof = True
+        cam.dof.focus_object = _obj(params["dof_object"])
+    if params.get("fstop") is not None:
+        cam.dof.use_dof = True
+        cam.dof.aperture_fstop = float(params["fstop"])
+    if params.get("use_dof") is not None:
+        cam.dof.use_dof = bool(params["use_dof"])
+    if params.get("make_active"):
+        bpy.context.scene.camera = obj
+
+    return {"camera": obj.name, "type": cam.type, "lens": cam.lens,
+            "clip_start": cam.clip_start, "clip_end": cam.clip_end,
+            "use_dof": cam.dof.use_dof, "focus_distance": cam.dof.focus_distance,
+            "aperture_fstop": cam.dof.aperture_fstop,
+            "is_scene_camera": bpy.context.scene.camera == obj}
+
+
+@command("objects.set_light", mutates=True)
+def set_light(params: dict) -> dict:
+    """Edit an existing light's energy, colour, size, type and shadow settings."""
+    obj = _obj(params["light"])
+    if obj.type != "LIGHT":
+        raise TypeError(f"{obj.name!r} is a {obj.type}, not a LIGHT")
+    light = obj.data
+
+    if params.get("type") is not None:
+        light.type = _enum(params["type"], _type_enum("Light", "type"), "type")
+    if params.get("energy") is not None:
+        light.energy = float(params["energy"])
+    if params.get("color") is not None:
+        light.color = _vec3(params["color"], "color")
+    if params.get("use_shadow") is not None:
+        light.use_shadow = bool(params["use_shadow"])
+
+    size_field = None
+    if params.get("size") is not None:
+        size = float(params["size"])
+        if light.type == "SUN":
+            light.angle = size
+            size_field = "angle"
+        elif light.type == "AREA":
+            light.size = size
+            size_field = "size"
+        else:
+            light.shadow_soft_size = size
+            size_field = "shadow_soft_size"
+
+    if params.get("spot_size") is not None:
+        if light.type != "SPOT":
+            raise TypeError(f"spot_size only applies to SPOT lights; {obj.name!r} is {light.type}")
+        light.spot_size = float(params["spot_size"])
+    if params.get("spot_blend") is not None:
+        light.spot_blend = float(params["spot_blend"])
+
+    result = {"light": obj.name, "type": light.type, "energy": light.energy,
+              "color": list(light.color), "use_shadow": light.use_shadow}
+    if size_field:
+        result["size_field"] = size_field
+        result["size"] = getattr(light, size_field)
+    if light.type == "SPOT":
+        result["spot_size"] = light.spot_size
+        result["spot_blend"] = light.spot_blend
+    return result
+
+
+_RAY_VISIBILITY = ("camera", "diffuse", "glossy", "transmission", "volume_scatter", "shadow")
+
+
+@command("objects.set_visibility", mutates=True)
+def set_visibility(params: dict) -> dict:
+    """Set viewport/render visibility and per-ray visibility flags.
+
+    The ray flags are what you need when emissive geometry sits inside a light:
+    an opaque bulb mesh blocks its own lamp until ``shadow=False`` clears it,
+    and the render just comes back dark with nothing to react to.
+    """
+    obj = _obj(params["object"])
+
+    applied = {}
+    for key, attr in (("hide_viewport", "hide_viewport"), ("hide_render", "hide_render")):
+        if params.get(key) is not None:
+            setattr(obj, attr, bool(params[key]))
+            applied[attr] = getattr(obj, attr)
+    if params.get("hide_get") is not None:
+        obj.hide_set(bool(params["hide_get"]))
+        applied["hide_get"] = obj.hide_get()
+
+    unsupported = []
+    for key in _RAY_VISIBILITY:
+        if params.get(key) is None:
+            continue
+        attr = f"visible_{key}"
+        if not hasattr(obj, attr):
+            unsupported.append(key)
+            continue
+        setattr(obj, attr, bool(params[key]))
+        applied[attr] = getattr(obj, attr)
+
+    result = {"object": obj.name, "applied": applied,
+              "ray_visibility": {k: getattr(obj, f"visible_{k}")
+                                 for k in _RAY_VISIBILITY if hasattr(obj, f"visible_{k}")},
+              "hide_viewport": obj.hide_viewport, "hide_render": obj.hide_render}
+    if unsupported:
+        result["unsupported"] = (
+            f"{unsupported} are Cycles ray-visibility flags not present on this "
+            f"object in the current render engine"
+        )
+    return result

@@ -1,6 +1,6 @@
 {
  "generated_by": "skills/blender-agent-mcp/scripts/gen_tool_inventory.py",
- "tool_count": 203,
+ "tool_count": 208,
  "modules": [
   "core",
   "objects",
@@ -16,7 +16,7 @@
   "io",
   "docs"
  ],
- "bridge_command_count": 197,
+ "bridge_command_count": 202,
  "bridge_source": "blender-runtime",
  "tools": [
   {
@@ -3407,6 +3407,36 @@
    ]
   },
   {
+   "name": "aim_at",
+   "module": "objects",
+   "summary": "Point a camera, light or any object at a target. No trig required.",
+   "description": "Point a camera, light or any object at a target. No trig required.\n\n        Rotates `object` so its local -Z axis (the direction cameras and spot\n        lights look) points at `target`.\n\n        Args:\n            object: The object to rotate.\n            target: An object name, or an [x, y, z] world-space point.\n            use_bounds: When `target` is an object name, aim at the centre of its\n                bounding box rather than its origin. Usually what you want \u2014 an\n                origin often sits at a corner or on the floor.\n\n        Sets `rotation_mode` to XYZ and returns the resulting euler in radians.\n        Use this instead of deriving the rotation yourself; the sign conventions\n        are easy to get subtly wrong and the error is hard to spot.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "object",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "target",
+     "type": "string|array",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_bounds",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    }
+   ]
+  },
+  {
    "name": "align_objects",
    "module": "objects",
    "summary": "Line objects up on one or more axes.",
@@ -3810,6 +3840,50 @@
    ]
   },
   {
+   "name": "frame_object",
+   "module": "objects",
+   "summary": "Place and aim a camera so a target object fills the frame.",
+   "description": "Place and aim a camera so a target object fills the frame.\n\n        The fastest way to actually see something. There is **no orbit/pan/zoom\n        tool**, so positioning a camera is the only way to view a subject from a\n        chosen angle; this makes it one call.\n\n        Args:\n            target: Object to frame.\n            camera: Camera to move. Defaults to the scene camera; errors if\n                there is none (create one with `add_camera`).\n            margin: Padding factor. 1.0 fits the bounding sphere exactly; 1.25\n                (default) leaves comfortable space. Below 1.0 crops.\n            direction: [x, y, z] direction **from** the object **to** the camera,\n                normalised internally. Default `[0, -1, 0.35]` is a front\n                three-quarter view slightly above. Try `[1, -1, 0.5]` for a\n                corner view, `[0, 0, 1]` for top-down.\n            make_active: Make it the scene camera, so `render_frame` and\n                `viewport_screenshot(camera_view=True)` use it.\n\n        Accounts for the render aspect ratio, so a portrait output frames\n        correctly. Then screenshot with `camera_view=True` to see the result.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "target",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "camera",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "margin",
+     "type": "number",
+     "required": false,
+     "default": 1.25,
+     "description": ""
+    },
+    {
+     "name": "direction",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "make_active",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    }
+   ]
+  },
+  {
    "name": "join_objects",
    "module": "objects",
    "summary": "Merge several objects into one. Destructive \u2014 the others are consumed.",
@@ -3985,6 +4059,243 @@
      "type": "boolean",
      "required": false,
      "default": true,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "set_camera",
+   "module": "objects",
+   "summary": "Change an existing camera's settings.",
+   "description": "Change an existing camera's settings.\n\n        Args:\n            lens: Focal length in **millimetres**. 50 is neutral, 24 wide, 85+\n                flattering for portraits and product shots.\n            type: PERSP, ORTHO or PANO.\n            ortho_scale: Viewport width in world units, for ORTHO cameras.\n            clip_start / clip_end: Near/far clip in world units. Geometry outside\n                this range vanishes \u2014 a common cause of \"my object disappeared\".\n            dof_object: Focus on this object; enables depth of field.\n            fstop: Aperture. Lower is shallower \u2014 1.4 is very shallow, 8 deep.\n\n        Setting any DOF parameter enables DOF automatically.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "camera",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "lens",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "type",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "ortho_scale",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "clip_start",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "clip_end",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "shift_x",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "shift_y",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "dof_distance",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "dof_object",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "fstop",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_dof",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "make_active",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "set_light",
+   "module": "objects",
+   "summary": "Change an existing light. Use this to tune lighting instead of re-creating it.",
+   "description": "Change an existing light. Use this to tune lighting instead of re-creating it.\n\n        Args:\n            energy: Power in **watts** for POINT/SPOT/AREA; **irradiance\n                (W/m\u00b2)** for SUN, where sensible values are around 1-5, not\n                hundreds. This trips people up constantly.\n            color: [r, g, b], each 0-1.\n            type: POINT, SUN, SPOT or AREA.\n            size: Softness/extent. Radius in world units for POINT/SPOT, edge\n                length for AREA, and **angular diameter in radians** for SUN\n                (0.00918 \u2248 the real sun). Bigger means softer shadows.\n            spot_size: Cone angle in **radians**, SPOT only.\n            spot_blend: 0-1 softness of the cone edge.\n\n        The result reports which property `size` was written to, since it differs\n        per light type.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "light",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "energy",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "type",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "size",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_shadow",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "spot_size",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "spot_blend",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "set_object_visibility",
+   "module": "objects",
+   "summary": "Control viewport/render visibility and per-ray visibility.",
+   "description": "Control viewport/render visibility and per-ray visibility.\n\n        The ray flags matter more than they sound. Emissive geometry placed\n        inside or around a light \u2014 a bulb mesh, a screen, neon, fire \u2014 will\n        **block that light's own output** because the mesh casts shadows onto\n        everything. The render comes back dark with no error to react to. The fix\n        is `shadow=False` on the emissive object.\n\n        Args:\n            hide_viewport / hide_render: Hide entirely from the viewport or the\n                final render.\n            camera: Visible to camera rays \u2014 set False to make an object light\n                the scene without appearing in it.\n            shadow: Whether the object casts shadows. Turn off for bulb meshes\n                and other emissive geometry wrapped around a light.\n            diffuse / glossy / transmission / volume_scatter: Contribution to\n                each ray type. Cycles only; EEVEE ignores them and the result\n                reports which were unsupported.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "object",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "hide_viewport",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "hide_render",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "camera",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "diffuse",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "glossy",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "transmission",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "volume_scatter",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "shadow",
+     "type": "boolean",
+     "required": false,
+     "default": null,
      "description": ""
     }
    ]
@@ -8686,6 +8997,13 @@
    "doc": "Create a light. ``size`` maps to the per-type softness/extent property."
   },
   {
+   "command": "objects.aim_at",
+   "module": "objects",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Rotate an object so its -Z axis points at a target point or object."
+  },
+  {
    "command": "objects.align_objects",
    "module": "objects",
    "mutates": true,
@@ -8749,6 +9067,13 @@
    "doc": "Copy one object, sharing (linked) or duplicating its object data."
   },
   {
+   "command": "objects.frame_object",
+   "module": "objects",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Place a camera so a target object fills the frame, and aim it at the object."
+  },
+  {
    "command": "objects.join_objects",
    "module": "objects",
    "mutates": true,
@@ -8791,11 +9116,32 @@
    "doc": "Make one object the active object (what mode changes and operators act on)."
   },
   {
+   "command": "objects.set_camera",
+   "module": "objects",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Edit an existing camera's lens, type, clipping and DOF."
+  },
+  {
+   "command": "objects.set_light",
+   "module": "objects",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Edit an existing light's energy, colour, size, type and shadow settings."
+  },
+  {
    "command": "objects.set_origin",
    "module": "objects",
    "mutates": true,
    "needs_gui": false,
    "doc": "Move an object's origin (or move geometry to the origin)."
+  },
+  {
+   "command": "objects.set_visibility",
+   "module": "objects",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Set viewport/render visibility and per-ray visibility flags."
   },
   {
    "command": "objects.snap_cursor_to",

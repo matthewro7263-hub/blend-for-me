@@ -332,6 +332,74 @@ def viewport_screenshot(params: dict) -> dict:
     )
 
 
+def _describe_render(path: str) -> dict:
+    """Sample a rendered image and say whether anything is actually in it.
+
+    A render that returns fully transparent or a single flat colour is reported
+    by Blender as a success. For an agent that is the worst possible outcome:
+    silent empty output leaves nothing to react to. Sampling is capped so this
+    stays cheap on large frames.
+    """
+    verdict = {"checked": False}
+    image = None
+    try:
+        image = bpy.data.images.load(path)
+        width, height = image.size
+        channels = image.channels
+        if not width or not height:
+            return {"checked": False, "note": "image reported zero size"}
+
+        pixels = image.pixels[:]
+        total = width * height
+        step = max(1, total // 20000)  # cap the sample regardless of resolution
+
+        alpha_max = 0.0
+        lo, hi = 1e9, -1e9
+        sampled = 0
+        for index in range(0, total, step):
+            base = index * channels
+            rgb = pixels[base:base + 3]
+            if not rgb:
+                break
+            lo = min(lo, *rgb)
+            hi = max(hi, *rgb)
+            if channels >= 4:
+                alpha_max = max(alpha_max, pixels[base + 3])
+            sampled += 1
+
+        verdict = {
+            "checked": True,
+            "sampled_pixels": sampled,
+            "rgb_min": round(lo, 5) if sampled else None,
+            "rgb_max": round(hi, 5) if sampled else None,
+            "alpha_max": round(alpha_max, 5) if channels >= 4 else None,
+        }
+        if channels >= 4 and alpha_max <= 1e-6:
+            verdict["blank"] = True
+            verdict["warning"] = (
+                "the render is fully transparent — nothing was visible to the "
+                "camera. Check the camera is aimed at the subject "
+                "(objects.frame_object), that the objects are not hidden in "
+                "render, and that the film is not set to transparent with no "
+                "geometry in frame."
+            )
+        elif sampled and (hi - lo) <= 1e-6:
+            verdict["blank"] = True
+            verdict["warning"] = (
+                f"the render is a single flat colour (value {round(hi, 4)}) — most "
+                "likely nothing is in frame or there is no light in the scene."
+            )
+        else:
+            verdict["blank"] = False
+    except Exception as exc:  # never fail a good render because the check broke
+        verdict = {"checked": False, "note": f"could not inspect: {type(exc).__name__}: {exc}"}
+    finally:
+        if image is not None:
+            with contextlib.suppress(Exception):
+                bpy.data.images.remove(image)
+    return verdict
+
+
 @command("render_frame", mutates=False)
 def render_frame(params: dict) -> dict:
     """Render the current frame with EEVEE or Cycles and return the PNG."""
@@ -392,6 +460,7 @@ def render_frame(params: dict) -> dict:
             engine=scene.render.engine,
             gpu=gpu_info,
         )
+        result["content"] = _describe_render(out_path)
         return result
     finally:
         scene.render.engine = saved["engine"]
