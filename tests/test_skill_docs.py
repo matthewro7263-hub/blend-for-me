@@ -210,6 +210,74 @@ def test_all_reference_files_exist_and_are_substantial():
     assert not problems, "; ".join(problems)
 
 
+def _known_identifiers(inventory: dict) -> set[str]:
+    """Tool names plus every parameter and returned-field name they use."""
+    known = set()
+    for tool in inventory["tools"]:
+        known.add(tool["name"])
+        for param in tool["params"]:
+            known.add(param["name"])
+        # Result fields appear in prose as `like_this`; harvest them from the
+        # docstrings so legitimate field references are not flagged.
+        known.update(re.findall(r"`([a-z][a-z0-9_]{2,})`", tool["description"]))
+    for command in inventory["bridge_commands"]:
+        known.add(command["command"])
+        known.add(command["command"].split(".")[-1])
+    return known
+
+
+# Prose words that look like identifiers but are not tools or params.
+_PROSE_ALLOWLIST = {
+    "has_view3d", "resolution_percentage", "blender_version", "png_b64",
+    "created_objects", "ignored_options", "applied_options", "needs_gui",
+    "frame_current", "frame_start", "frame_end", "vertices_after",
+    "vertices_before", "total_levels", "matrix_world", "bound_box",
+    "use_unified_size", "size_written_to", "strength_written_to",
+    "radial_supported", "dropped_points", "missed_rays", "screenshot_note",
+    "mode_used", "only_selected", "link_count", "node_count", "action_slot",
+    "rotation_mode", "rotation_euler", "rotation_quaternion", "data_path",
+    "object_count", "bridge_commands", "tool_count", "bridge_source",
+    "remesh_voxel_size", "sculpt_tool", "use_seam", "active_render",
+    "coverage_percent", "overlap_likely", "loops_outside_0_1", "texel_density_hint",
+    "use_dynamic_topology_sculpting", "detail_type_method", "detail_refine_method",
+    "constant_detail_resolution", "detail_size", "unprojected_size",
+    "use_symmetry_x", "use_symmetry_y", "use_symmetry_z", "use_symmetry_feather",
+    "brush_asset_reference", "relative_asset_identifier", "asset_library_type",
+    "vert_mapping", "data_type", "input_schema", "total_keyframes",
+    "keyframes_changed", "discarded_unsaved_changes", "is_dirty",
+    "per_bone_weight_summary", "socket_type", "in_out", "default_value",
+    "items_tree", "node_group", "bl_idname", "use_edge_sharp",
+}
+
+
+@pytest.mark.parametrize("doc_name", [
+    "SKILL.md",
+    "references/sculpting.md",
+    "references/weight-painting.md",
+    "references/rigging-animation.md",
+    "references/recipes.md",
+    "references/troubleshooting.md",
+])
+def test_docs_do_not_reference_nonexistent_tools(inventory, doc_name):
+    """Catch a documented call like `select_geometry(...)` when the tool is
+    actually `mesh_select_geometry`. This is the failure mode that makes a skill
+    actively harmful: the agent confidently calls something that does not exist.
+    """
+    path = SKILL / doc_name
+    if not path.is_file():
+        pytest.skip(f"{doc_name} not present")
+    text = path.read_text(encoding="utf-8")
+    known = _known_identifiers(inventory) | _PROSE_ALLOWLIST
+
+    # Anything written in call form is unambiguously meant as a tool call.
+    called = set(re.findall(r"^\s*([a-z][a-z0-9_]{2,})\s*\(", text, re.MULTILINE))
+    bogus = sorted(name for name in called if name not in known)
+    assert not bogus, (
+        f"{doc_name} calls tools that do not exist: {bogus}\n"
+        f"Check the real names in references/_tool_inventory.json."
+    )
+
+
 def test_skill_md_routes_to_every_reference_file():
     """A reference nobody is told to open may as well not exist."""
     text = SKILL_MD.read_text(encoding="utf-8")

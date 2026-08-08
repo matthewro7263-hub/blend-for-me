@@ -79,12 +79,12 @@ Growing a limb on a sculpt. Note the verification between every step:
 ```
 undo_checkpoint(label="before left foreleg")
 get_object_info(name="Puppy")                  # confirm origin + world matrix
-select_geometry(object="Puppy", domain="VERT", bounding_box=[[-0.6,-1.0,-0.9],[-0.2,-0.4,-0.3]])
+mesh_select_geometry(name="Puppy", domain="VERT", bounding_box=[[-0.6,-1.0,-0.9],[-0.2,-0.4,-0.3]])
 mask_from_selection(object="Puppy", invert=True)   # protect everything else
 mask_filter(filter_type="SMOOTH", iterations=2)    # soften the mask border
 sculpt_mesh_filter(type="INFLATE", strength=0.35, return_screenshot=True)
 viewport_screenshot(max_size=900)              # did it grow where intended?
-mesh_stats(object="Puppy")                     # did the topology survive?
+mesh_stats(name="Puppy")                       # did the topology survive?
 ```
 
 If the screenshot shows the wrong region, `undo` and re-cut the bounding box —
@@ -163,7 +163,7 @@ operation may well have completed.
 | Production-clean quad topology | `quadriflow_remesh` (slow — allow minutes) |
 | Detail only where you brush | `dyntopo_enable` |
 | Non-destructive / parametric | modifiers: `add_subsurf`, `add_mirror`, `add_solidify`, `add_boolean` |
-| Precise, measurable edits | mesh tools: `extrude_selection`, `inset`, `bevel`, `subdivide` |
+| Precise, measurable edits | mesh tools: `mesh_extrude`, `mesh_inset`, `mesh_bevel`, `mesh_subdivide` |
 
 ### Weights
 

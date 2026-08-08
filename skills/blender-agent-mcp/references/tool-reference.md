@@ -345,8 +345,8 @@ undo_checkpoint(label="before limb blockout")
 
 See the 3D viewport. Returns an image you can actually look at.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — needs a real 3D Viewport; refuses under
+`blender --background`.
 
 **vs:** `render_frame` — screenshot for every iteration (fast, ~1 s); render_frame only for a final look.
 
@@ -1834,8 +1834,8 @@ set_modifier_prop(object="Body", modifier="Mirror", settings={"use_axis": [True,
 
 Clear the sculpt mask so the whole surface is editable again.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1898,8 +1898,8 @@ dyntopo_enable(detail=12.0, mode="RELATIVE", refine_method="SUBDIVIDE_COLLAPSE",
 
 Re-tessellate the whole mesh to the current dyntopo detail level.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1939,8 +1939,8 @@ enter_sculpt(object="Body")
 
 Show or hide face sets: TOGGLE, SHOW_ACTIVE or HIDE_ACTIVE.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1962,8 +1962,8 @@ face_set_visibility(mode="HIDE_ACTIVE", object="Body")
 
 Create a face set from the mask, visible geometry, all, or selection.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -1985,8 +1985,8 @@ face_sets_create(mode="MASKED", object="Body")
 
 Generate face sets automatically from mesh structure.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2024,8 +2024,8 @@ get_sculpt_state()
 
 Invert the sculpt mask — protected becomes editable and vice versa.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2045,8 +2045,8 @@ invert_mask(object="Body")
 
 Mask a rectangular screen region.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2074,8 +2074,8 @@ mask_box(xmin=120, xmax=640, ymin=200, ymax=560, mode="VALUE", value=1.0)
 
 Mask by surface cavity — automatically finds creases and crevices.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2097,8 +2097,8 @@ mask_by_cavity(mix_mode="MIX", mix_factor=1.0, object="Body")
 
 Grow, shrink, smooth or sharpen the existing mask.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2197,8 +2197,8 @@ quadriflow_remesh(target_faces=8000, mode="FACES", preserve_sharp=True, object="
 
 Strokes radiating out from a centre point, evenly spaced.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 **vs:** `sculpt_symmetry` — radial symmetry no longer exists in 5.x, so this is the only way to get evenly spaced repeated strokes around a hub.
 
@@ -2232,8 +2232,8 @@ radial_strokes(center=[0, 0, 1.1], radius=0.35, count=8, steps=10, axis="Z", siz
 
 Unhide all geometry hidden by face-set visibility.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2269,8 +2269,8 @@ sculpt_list_brushes()
 
 Apply a filter to the whole mesh at once, no brushing.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 **vs:** brush strokes — the filter changes the WHOLE mesh (or the unmasked part) at once; strokes change one place. Mask, then filter, is how you inflate exactly one region.
 
@@ -2330,8 +2330,8 @@ sculpt_set_brush(name="Clay Strips", size_px=55, strength=0.5, direction="ADD")
 
 Apply a brush stroke through a list of 3D points.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2381,8 +2381,8 @@ sculpt_symmetry(x=True, y=False, z=False, feather=True)
 
 Smooth brush stroke along a spline through control points.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2408,8 +2408,8 @@ stroke_curve(control_points=[[0, -0.8, 0.3], [0, -0.2, 0.62], [0, 0.4, 0.4]], st
 
 Straight brush stroke from point a to point b.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 **vs:** `stroke_curve` vs `stroke_on_surface` — line for a straight ridge or crease; curve for organic flow through known 3D points; on_surface when you would rather draw on the screenshot than compute coordinates.
 
@@ -2439,8 +2439,8 @@ stroke_line(a=[0, -0.9, 0.35], b=[0, 0.2, 0.55], steps=14, size_px=55)
 
 Draw a stroke by tracing a 2D path across the viewport.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — this walks the PBVH and would SEGFAULT under
+`blender --background`, so the handler refuses before invoking the operator.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -2554,8 +2554,8 @@ auto_weights(mesh="Body", armature="Rig", method="AUTOMATIC", timeout=180.0)
 
 Drag the weight brush along a path of 3D points.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — needs a real 3D Viewport; refuses under
+`blender --background`.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -3094,8 +3094,8 @@ vgroup_rename(mesh="Body", name="Bone.001", new_name="upper_arm.L")
 
 Paint a linear or radial weight gradient between two 3D points.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — needs a real 3D Viewport; refuses under
+`blender --background`.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -3125,8 +3125,8 @@ weight_gradient(mesh="Body", start=[0.2, 0, 1.4], end=[0.55, 0, 1.1], group="upp
 
 See one group's weights as the blue-to-red heatmap. Returns an image.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — needs a real 3D Viewport; refuses under
+`blender --background`.
 
 **vs:** `viewport_screenshot` — the heatmap forces Weight Paint mode and the overlay colours; a plain screenshot shows you nothing about weights.
 
@@ -3932,8 +3932,8 @@ set_node_prop(material="Skin", node="Principled BSDF", prop="Roughness", value=0
 
 Switch how the 3D viewport draws.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — needs a real 3D Viewport; refuses under
+`blender --background`.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
@@ -4267,8 +4267,8 @@ nla_push_down(object="Rig", track_name="Walk")
 
 Render an OpenGL preview of the animation.
 
-**GUI Blender only** — refuses under `blender --background`; sculpt-session
-operators would segfault, so the handler refuses before invoking them.
+**GUI Blender only** — needs a real 3D Viewport; refuses under
+`blender --background`.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
