@@ -36,6 +36,7 @@ Translate before you act:
 
 | Symptom (what you actually see) | Root cause | Fix |
 | --- | --- | --- |
+| Stroke reports `points_applied` > 0 but a follow-up `mesh_stats` / `execute_python` measurement shows no change | Sculpt Mode holds displacement in its session; mesh data reads stale until it flushes | Trust the **screenshot**, not the numbers — the viewport draws from the session. The stroke tools now flush before returning; if you measure by another route, `set_mode(mode="OBJECT")` first. |
 | `Could not reach Blender on 127.0.0.1:9876.` | Bridge not started, or Blender closed | Give the user the four-step start instructions (below), then `reconnect()`. |
 | `Port 9876 is already in use.` reported in Blender's UI | A stale Blender or another process holds the port | User runs `lsof -nP -iTCP:9876 -sTCP:LISTEN`, kills it — or changes the port in the N-panel and exports `BLENDER_AGENT_PORT=9877` for the MCP server. |
 | `bridge already running on port 9876` | Start pressed twice | Nothing to fix. Call `reconnect()`. |

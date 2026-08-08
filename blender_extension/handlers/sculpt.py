@@ -434,7 +434,25 @@ def _maybe_screenshot(params: dict) -> dict | None:
         return None
 
 
+def flush_sculpt(obj) -> None:
+    """Push sculpt-session changes into the mesh so a later read sees them.
+
+    Sculpt Mode keeps displacement in its own session; ``obj.data.vertices`` and
+    ``evaluated_get(...).to_mesh()`` both keep reporting the *pre-stroke*
+    positions until something flushes it. An agent that strokes and then
+    measures gets stale numbers and concludes — wrongly — that the stroke did
+    nothing. Verified on 5.2: a clay strip that moved max radius to 1.05 still
+    read as 1.00 until the session flushed.
+    """
+    try:
+        obj.update_tag()
+        bpy.context.view_layer.update()
+    except Exception:  # never let a verification aid break the stroke itself
+        pass
+
+
 def _stroke_result(obj, count: int, dropped: list, params: dict) -> dict:
+    flush_sculpt(obj)
     result = {"object": obj.name, "points_applied": count,
               "vertices": len(obj.data.vertices)}
     if dropped:
@@ -929,6 +947,7 @@ def mesh_filter(params: dict) -> dict:
     else:
         bpy.ops.sculpt.mesh_filter(**kwargs)
 
+    flush_sculpt(obj)
     result = {"type": kind, "strength": kwargs["strength"],
               "iterations": kwargs["iteration_count"], "object": obj.name}
     shot = _maybe_screenshot(params) if params.get("return_screenshot") else None

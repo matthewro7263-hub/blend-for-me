@@ -212,3 +212,21 @@ raising.
   `TimeoutError` is re-raised first (bit us in `bridge_client.call`).
 * **f-strings cannot be docstrings.** `f"""..."""` as a function's first statement
   leaves `__doc__` as `None`, which would ship MCP tools with no description.
+
+## 9. Sculpt changes read stale until the session flushes
+
+Verified live on GUI Blender 5.2. After `sculpt.brush_stroke` succeeds, **both**
+`obj.data.vertices` and `obj.evaluated_get(depsgraph).to_mesh()` keep reporting
+pre-stroke positions until the sculpt session flushes. A clay strip that had
+actually moved max radius from 1.000 to 1.052 still measured 1.000 immediately
+afterwards, and only appeared after an unrelated later call.
+
+This is a trap for exactly the verify-after-mutate loop the tools encourage: an
+agent strokes, measures, sees no change and concludes the stroke silently
+failed. `handlers/sculpt.py::flush_sculpt` therefore runs `obj.update_tag()` +
+`view_layer.update()` before every stroke and mesh-filter result is built, so a
+subsequent read is accurate. Leaving Sculpt Mode also flushes.
+
+Screenshots are unaffected — the viewport draws from the sculpt session, so a
+`viewport_screenshot` shows the change even while the mesh data still reads
+stale. When a stroke's numbers and its screenshot disagree, trust the screenshot.
