@@ -301,6 +301,20 @@ Something else holds it — often a previous Blender that did not shut down
 cleanly. Find it with `lsof -nP -iTCP:9876 -sTCP:LISTEN`, or just pick another
 port in the panel and set `BLENDER_AGENT_PORT` to match for the MCP server.
 
+**Port 9876 collides with Blender's own MCP add-on.** Blender Lab's official
+`mcp` extension also defaults to `DEFAULT_PORT = 9876`. If both are installed
+and started, whichever starts first wins and the other fails to bind. Worse, the
+MCP server will happily connect to the *other* server and then time out, which
+reads like "Blender is not responding" rather than "wrong server". If `health`
+connects but every command times out, check which add-on owns the port:
+
+```bash
+lsof -nP -iTCP:9876 -sTCP:LISTEN
+```
+
+Then either stop the other server, or move this bridge to another port in the
+N-panel and set `BLENDER_AGENT_PORT` to match for the MCP server.
+
 **macOS firewall prompt on first start**
 macOS may ask whether Blender should accept incoming connections. Allowing it is
 safe — the bridge binds loopback only, so nothing off this machine can reach it.
