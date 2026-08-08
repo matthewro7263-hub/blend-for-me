@@ -3,7 +3,7 @@ PORT    ?= 9876
 TESTPORT?= 9899
 REPO    := $(shell pwd)
 
-.PHONY: help build-ext install-ext run-server test test-unit smoke demo probe clean
+.PHONY: help build-ext install-ext run-server test test-unit smoke demo probe clean skill-inventory skill-check
 
 help:
 	@echo "build-ext    Build dist/blender_agent_mcp-*.zip"
@@ -13,6 +13,8 @@ help:
 	@echo "smoke        Headless integration smoke only"
 	@echo "demo         GUI acceptance demo (needs Blender running with the bridge)"
 	@echo "probe        Re-verify Blender/MCP APIs after an upgrade"
+	@echo "skill-inventory  Regenerate the Agent Skill's tool inventory"
+	@echo "skill-check      Fail if the skill inventory is stale"
 
 build-ext:
 	python3 scripts/build_extension.py
@@ -36,6 +38,12 @@ demo:
 
 probe:
 	$(BLENDER) --background --factory-startup --python scripts/probe_api.py
+
+skill-inventory:
+	cd mcp_server && uv run python ../skills/blender-agent-mcp/scripts/gen_tool_inventory.py
+
+skill-check:
+	cd mcp_server && uv run python ../skills/blender-agent-mcp/scripts/gen_tool_inventory.py --check
 
 clean:
 	rm -rf dist .pytest_cache

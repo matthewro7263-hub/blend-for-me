@@ -210,6 +210,54 @@ Use the first for signatures, the second for understanding.
 
 ---
 
+## The Agent Skill
+
+The repo ships an [Agent Skill](https://code.claude.com/docs/en/skills) at
+[`skills/blender-agent-mcp/`](skills/blender-agent-mcp/) that teaches an agent
+how to *use* these tools well — session-start protocol, the observe-act-verify
+loop, tool-selection decision tables, and deep references on sculpting, weight
+painting, rigging and troubleshooting.
+
+Registering the MCP server gives an agent the tools; installing the skill gives
+it the judgement to sequence them.
+
+### Install it
+
+Skills load from a `skills/<skill-name>/SKILL.md` directory. Pick a scope:
+
+```bash
+# This project only — everyone who clones the repo gets it
+mkdir -p .claude/skills && ln -s ../../skills/blender-agent-mcp .claude/skills/blender-agent-mcp
+```
+
+```bash
+# All your projects
+mkdir -p ~/.claude/skills && cp -R skills/blender-agent-mcp ~/.claude/skills/
+```
+
+| Scope | Path |
+| --- | --- |
+| Personal | `~/.claude/skills/blender-agent-mcp/SKILL.md` |
+| Project | `.claude/skills/blender-agent-mcp/SKILL.md` |
+| Plugin | `<plugin>/skills/blender-agent-mcp/SKILL.md` |
+
+A symlink keeps the project copy in sync with the repo; `cp -R` does not.
+Confirm it loaded by typing `/blender-agent-mcp` — Claude also invokes it on its
+own whenever a request involves Blender.
+
+### Regenerate the inventory after adding tools
+
+`references/_tool_inventory.json` is generated from the live MCP server and is
+what the documentation tests check against. After adding or changing any tool:
+
+```bash
+make skill-inventory
+```
+
+Then update `references/tool-reference.md` to match and run `make test`. The
+tests fail if a tool exists but is undocumented, if a documented tool does not
+exist, if any parameter list has drifted, or if a GUI-only tool is not flagged.
+
 ## Development
 
 ```bash
