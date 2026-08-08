@@ -23,6 +23,13 @@ work away silently — the tool returns `ok` and the groups are simply gone.
 
 ## 1. The standard chain after auto_weights
 
+
+> **This section is the single authority for the cleanup chain.** `recipes.md`
+> and `rigging-animation.md` abbreviate it inline for readability; where they
+> differ in order or in `group_select_mode`, follow the chain here. Copy group
+> and bone names from `vgroup_list` / `list_bones`, never from an example — the
+> names in these files are illustrative and lookups are literal string matches.
+
 Run this in order. Checkpoint first, because steps 3–5 are destructive and you
 cannot un-drop an influence.
 
@@ -252,7 +259,7 @@ deform group. Confirm with `report_unweighted_verts`, do not judge by eye.
 Two capture gotchas:
 
 - The heatmap shows **the current viewport camera**. Back-facing and occluded
-  geometry is invisible. Orbit the view before capturing an armpit or an inner
+  geometry is invisible. There is no orbit tool — `add_camera` at the angle you need and screenshot with `camera_view=True`, or ask the user to orbit, before capturing an armpit or an inner
   thigh, and take a second shot from the other side.
 - `use_render=true` runs `render.opengl`, which **omits the weight colours
   entirely** — the overlay engine draws them. Leave it `false` (the default).
@@ -404,7 +411,7 @@ weight_gradient(mesh="Cape", start=[0.0, 0.14, 1.62], end=[0.0, 0.34, 0.18], gro
 - `type="LINEAR"` is a band perpendicular to start→end; `"RADIAL"` is concentric
   around `start`, reaching 0 at `end`.
 - Both endpoints must project **in front of** the viewport camera or the call
-  fails with an explanation. Orbit first.
+  fails with an explanation. You cannot orbit: place a camera with `add_camera` and screenshot with `camera_view=True`, or ask the user.
 - `space` is `WORLD` (default) or `LOCAL`.
 - The result reports `start_region_px`, `end_region_px` and `region_size` — check
   them; a gradient that lands mostly off-screen produces near-uniform weights.

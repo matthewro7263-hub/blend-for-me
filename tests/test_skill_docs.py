@@ -278,6 +278,43 @@ def test_docs_do_not_reference_nonexistent_tools(inventory, doc_name):
     )
 
 
+@pytest.mark.parametrize("doc_name", [
+    "SKILL.md",
+    "references/sculpting.md",
+    "references/weight-painting.md",
+    "references/rigging-animation.md",
+    "references/recipes.md",
+    "references/troubleshooting.md",
+])
+def test_documented_calls_use_real_parameters(inventory, doc_name):
+    """Catch `voxel_remesh(timeout=300)` when voxel_remesh has no timeout param.
+
+    Advice to pass an argument a tool does not accept fails at exactly the
+    moment the agent needed it to work.
+    """
+    path = SKILL / doc_name
+    if not path.is_file():
+        pytest.skip(f"{doc_name} not present")
+    text = path.read_text(encoding="utf-8")
+    by_name = {t["name"]: {p["name"] for p in t["params"]} for t in inventory["tools"]}
+
+    problems = []
+    # tool_name( ... ) possibly spanning lines, up to the matching close paren.
+    for match in re.finditer(r"\b([a-z][a-z0-9_]{2,})\(([^()]*(?:\([^()]*\)[^()]*)*)\)",
+                             text, re.DOTALL):
+        tool, arglist = match.group(1), match.group(2)
+        params = by_name.get(tool)
+        if params is None:
+            continue  # not a tool call; the phantom-tool test covers those
+        for kwarg in re.findall(r"(?:^|[,\s])([a-z][a-z0-9_]*)\s*=", arglist):
+            if kwarg not in params:
+                line = text[:match.start()].count("\n") + 1
+                problems.append(f"{doc_name}:{line} {tool}({kwarg}=...) — "
+                                f"valid params: {sorted(params)}")
+    assert not problems, "documented calls use nonexistent parameters:\n  " + \
+        "\n  ".join(sorted(set(problems))[:30])
+
+
 def test_skill_md_routes_to_every_reference_file():
     """A reference nobody is told to open may as well not exist."""
     text = SKILL_MD.read_text(encoding="utf-8")

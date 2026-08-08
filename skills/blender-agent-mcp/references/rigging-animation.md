@@ -257,6 +257,8 @@ before you animate anything.
 
 The loop, literally:
 
+> Abbreviated. `weight-painting.md` §1 is authoritative for this chain's order and `group_select_mode` arguments — follow it if they differ.
+
 ```
 undo_checkpoint(label="before knee pose test")
 pose_bone(armature="Rig", bone="shin.L", rotation_euler=[1.5708, 0, 0], space="LOCAL")

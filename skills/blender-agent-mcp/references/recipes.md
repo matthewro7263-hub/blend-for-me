@@ -343,6 +343,8 @@ that would otherwise occupy a top-4 slot; smoothing *adds* influences, so
 `limit_total` must come after it; `normalize_all` must come last because
 dropping influences leaves the remainder summing below 1.
 
+> Abbreviated. `weight-painting.md` §1 is authoritative for this chain's order and `group_select_mode` arguments — follow it if they differ.
+
 ```
 undo_checkpoint(label="before weight cleanup chain")
 clean_weights(mesh="Body", threshold=0.01, group_select_mode="ALL", keep_single=true)

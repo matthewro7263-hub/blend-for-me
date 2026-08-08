@@ -360,7 +360,7 @@ Pass `space="WORLD"` only when you have world coordinates in hand; convert using
 Points do not have to sit exactly on the surface — the brush works within its radius
 of each sample — but they must sit close, and they must be **in front of the
 viewport camera**. Points that project behind the view come back in
-`dropped_points`; if you see any, orbit the view to face the work and re-run. If
+`dropped_points`; if you see any, you cannot orbit — there is no viewport-navigation tool. Either `add_camera` at the angle you need and `viewport_screenshot(camera_view=True)`, or ask the user to orbit Blender's viewport and confirm when done. Then re-run. If
 fewer than 2 points survive, the call raises instead of half-applying.
 
 ### Choosing `steps`
@@ -514,7 +514,7 @@ a stroke that landed in empty space still returns `ok`.
 | Stroke barely visible | `strength` too low, or the area is masked | `get_sculpt_state` → check `has_mask`; `clear_mask` |
 | Stroke reports success, nothing changed at all | Geometry is hidden by a face set | `reveal_all` |
 | Stroke landed in the wrong place | Wrong `space`, or the object has a non-identity transform | `get_object_info` → read `matrix_world`; use `space="WORLD"` or convert |
-| `dropped_points` in the result | Those samples project behind the view | Orbit to face the work and re-run; do not compensate by moving the points |
+| `dropped_points` in the result | Those samples project behind the view | You cannot orbit: `add_camera` at the needed angle + `viewport_screenshot(camera_view=True)`, or ask the user to orbit. Do not compensate by moving the points |
 | `missed_rays` from `stroke_on_surface` | Those 2D points hit nothing | `viewport_screenshot` first and re-aim, or switch to 3D coordinates |
 | Mirrored strokes land off-centre | Object origin is not on the symmetry plane | `object_bounds` → compare `world.center` to `location`; `set_origin` |
 | Mesh ballooned to millions of vertices | `voxel_size` too small, or `refine_method="SUBDIVIDE"` on dyntopo | `undo`; recompute `voxel_size` from `object_bounds` |

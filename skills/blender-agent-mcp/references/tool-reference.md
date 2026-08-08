@@ -2346,7 +2346,7 @@ Returns: A summary `{object, points_applied, vertices, dropped_points}` AND a vi
 
 Gotchas:
 
-- Points that project behind the camera come back in `dropped_points` rather than being silently skipped. If you see any, orbit the view to face the work.
+- Points that project behind the camera come back in `dropped_points` rather than being silently skipped. There is no orbit tool: `add_camera` at the angle you need and screenshot with `camera_view=True`, or ask the user to orbit.
 - The real brush engine runs, so the active brush, strength, symmetry and dyntopo settings all apply.
 - `size_px` overrides the brush size for this stroke only, in SCREEN PIXELS.
 
@@ -3144,7 +3144,7 @@ Gotchas:
 
 - Blue 0, green ~0.5, red 1.0, BLACK means the vertex is not in the group at all — black is the finding, not a rendering glitch.
 - `use_render=true` gives a clean pass with no viewport chrome but the weight colours are MISSING, because they are drawn by the overlay engine. Leave it false.
-- Shows the current viewport camera; orbit first if the area you care about faces away.
+- Shows whatever view the user left. If the area you care about faces away, `add_camera` there and pass `camera_view=True` — there is no orbit tool.
 
 ```python
 weight_heatmap(mesh="Body", group="forearm.L", max_size=1024, show_contours=True)

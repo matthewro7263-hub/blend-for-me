@@ -37,6 +37,12 @@ sculpt masks/face-sets/mesh-filters, `weight_gradient`, `weight_heatmap`,
 
 Run this every session, before any other tool. Never act on an assumed scene.
 
+0. **Confirm you have the right server.** These tools come from
+   **blender-agent-mcp**. If `health` is not among your available tools, or the
+   only Blender server present exposes a different surface (`execute_blender_code`,
+   `get_objects_summary`, `get_screenshot_of_window_as_image`), this skill does
+   not apply to it. Say so and ask the user to enable blender-agent-mcp rather
+   than improvising against the other server's tools.
 1. `health` — is the bridge up, and is a viewport available?
 2. `get_blender_version` — confirms version and `has_view3d`.
 3. `get_scene_info` — real object names, active object, mode, frame.
@@ -49,8 +55,10 @@ If `health` reports not connected, tell the user exactly this:
 > press **N**, open the **Agent MCP** tab and press **Start Server**, (4) check
 > the port shown there is 9876 (or tell me which port it uses).
 
-Then call `reconnect` and retry. Do not attempt workarounds; nothing works
-without the bridge.
+Then **stop and wait for the user to confirm** they have done it. Do not call
+`reconnect` speculatively — they have not acted yet. Once they confirm, call
+`reconnect`, then re-run this protocol from step 1: reconnecting tells you the
+socket is up, not what state the scene is in.
 
 If `has_view3d` is false you are on headless Blender: say so up front and steer
 to data-API tools. Do not plan a sculpting session you cannot execute.
@@ -61,7 +69,8 @@ Every mutating call gets verified before you build on it.
 
 | After | Verify with |
 | --- | --- |
-| Any sculpt stroke or filter | `viewport_screenshot` (stroke tools return one automatically) |
+| Any sculpt stroke | `viewport_screenshot` — stroke tools return one automatically (`return_screenshot` defaults true) |
+| `sculpt_mesh_filter` | It does **not** screenshot by default. Pass `return_screenshot=True` or take one yourself. |
 | Remesh, subdivide, decimate, boolean | `mesh_stats` — check the vertex/face delta is what you expected |
 | Transform, parent, modifier change | `get_object_info` |
 | Weight edits | `weight_heatmap`, plus `report_unweighted_verts` / `report_over_influenced` |
@@ -79,7 +88,8 @@ Growing a limb on a sculpt. Note the verification between every step:
 ```
 undo_checkpoint(label="before left foreleg")
 get_object_info(name="Puppy")                  # confirm origin + world matrix
-mesh_select_geometry(name="Puppy", domain="VERT", bounding_box=[[-0.6,-1.0,-0.9],[-0.2,-0.4,-0.3]])
+mesh_select_geometry(name="Puppy", domain="VERT",
+                     box_min=[-0.6,-1.0,-0.9], box_max=[-0.2,-0.4,-0.3], space="OBJECT")
 mask_from_selection(object="Puppy", invert=True)   # protect everything else
 mask_filter(filter_type="SMOOTH", iterations=2)    # soften the mask border
 sculpt_mesh_filter(type="INFLATE", strength=0.35, return_screenshot=True)
@@ -112,19 +122,30 @@ Say the unit out loud when you report a value to the user. "I inflated by 0.35
 
 ## Timeouts for slow work
 
-Default is 10s. These need more, and the tools already default higher — raise
-further on heavy meshes rather than concluding the bridge died.
+**Only 18 of the 203 tools accept a `timeout` argument.** Passing it to one that
+does not is an argument error — on exactly the call you were trying to rescue.
 
-| Operation | Sensible timeout |
+Tools that take `timeout` (seconds), with sensible values for heavy meshes:
+
+| Tool | Start with |
 | --- | --- |
-| `voxel_remesh` | 300s (cost scales ~cubically as voxel size shrinks) |
-| `quadriflow_remesh` | 600s — minutes is normal |
-| `render_frame` (Cycles) | 300s+ depending on samples |
-| `playblast` | 600s |
-| `smart_uv_project`, `pack_islands` on dense meshes | 180s |
+| `auto_weights` | 180 |
+| `smooth_weights`, `mirror_weights`, `transfer_weights` | 120 |
+| `render_frame` | 300+, depending on samples |
+| `playblast` | 600 |
+| `bake` | 300 |
+| `import_model`, `export_model` | 180 |
+| `apply_modifier`, `mesh_decimate`, `multires_subdivide`, `multires_unsubdivide`, `multires_apply_base` | 120–300 |
+| `report_unweighted_verts`, `report_over_influenced`, `per_bone_weight_summary` | 60–120 |
+| `execute_python` | as needed |
 
-A timeout is not a crash. Re-check with `get_scene_info` before retrying — the
-operation may well have completed.
+**`voxel_remesh`, `quadriflow_remesh`, `smart_uv_project` and `pack_islands`
+take no `timeout`.** They are slow — quadriflow runs for minutes — but their
+budget is set server-side. If one times out, do **not** re-issue it with a
+`timeout` argument. Re-check with `get_scene_info` and `mesh_stats` first: the
+operation has usually completed, and re-running it would remesh twice.
+
+A timeout is not a crash. Verify state before retrying anything.
 
 ## Golden rules
 
@@ -169,7 +190,7 @@ operation may well have completed.
 
 | Situation | Approach |
 | --- | --- |
-| Fresh rig | `auto_weights` → the cleanup chain (see `references/weight-painting.md`) |
+| Fresh rig | `auto_weights` → the cleanup chain. `references/weight-painting.md` §1 is the **single authority** for that chain's order and arguments; where a recipe abbreviates it, follow weight-painting.md. |
 | Bad deformation at one joint | `select_verts_by_weight` → `smooth_weights` / `assign_weights` → `weight_heatmap` |
 | Copying to clothing or a new mesh | `transfer_weights` |
 | Preparing for a game engine | `limit_total(4)` → `normalize_all` → `report_over_influenced` |
@@ -197,7 +218,7 @@ including the full Blender traceback. Then:
 | "needs a real 3D Viewport" / would crash headless | You are headless. Switch to the data-API equivalent or tell the user to use GUI Blender. |
 | "poll() failed, context is incorrect" | Wrong mode. `set_mode` explicitly, then retry. |
 | "no sculpt brush matching X" | `sculpt_list_brushes` — the real 5.x names are compound. |
-| Timed out | Retry with a bigger `timeout`; check `get_scene_info` first in case it succeeded. |
+| Timed out | Check `get_scene_info` / `mesh_stats` first — it usually finished. Only retry with a bigger `timeout` if that tool actually accepts one (see above). |
 | Enum rejected, valid values listed | Use one of the listed values verbatim. They come from live RNA. |
 | Tool succeeded but nothing visibly changed | Wrong object, wrong mode, or masked geometry. Check `get_scene_info` and `get_sculpt_state`. |
 
@@ -215,7 +236,11 @@ For anything beyond a couple of calls:
    forward. Compensating for a mistake with a second operation usually
    compounds it.
 5. Do irreversible things last: applying modifiers, `voxel_remesh` (destroys UVs
-   and vertex groups), `apply_transforms`, saving over a file.
+   and vertex groups), saving over a file.
+6. `apply_transforms` is the exception — it must happen **early**, before
+   remeshing, rigging or export, because `voxel_size` and bone coordinates are
+   world units and a scaled object throws them off. It permanently bakes the
+   user's object scale, so tell them you are doing it and why.
 
 Order that matters, and burns people who get it wrong:
 
@@ -230,12 +255,14 @@ Open these — do not work from memory.
 
 | File | Open it when |
 | --- | --- |
-| `references/tool-reference.md` | You need a tool's exact params, units, returns or gotchas. Every one of the 203 tools, grouped by module. |
+| `references/tool-reference.md` | You need a tool's exact params, units, returns or gotchas. All 203 tools. **Do not read it whole — it is 4,800 lines. Grep for `### <tool_name>` and read the ~15 lines after it.** |
 | `references/sculpting.md` | **Before any sculpting session.** Pass structure, brush table with starting values, detail-management decision tree, stroke planning with worked coordinates. |
 | `references/weight-painting.md` | **Before any weighting or skinning work.** The post-auto-weights cleanup chain, how to read a heatmap, diagnostics interpretation, game-export checklist. |
 | `references/rigging-animation.md` | Building armatures, IK, constraints, posing, keyframes, playblasts. |
 | `references/recipes.md` | The task resembles a known end-to-end workflow. Eight literal tool-call sequences, checkpoints included. |
-| `references/troubleshooting.md` | **First stop on any error or unexpected result**, before you retry or improvise. |
+| `references/troubleshooting.md` | **First stop on any error**, before you retry or improvise. |
+| `references/recipes.md` §4 then `references/weight-painting.md` §2 | The user reports a bad or odd **result with no error** — a collapsing joint, a limb that tears, a wrong-looking deform. |
+| `references/recipes.md` §6 then `references/weight-painting.md` §5 | Exporting to a game engine, or any "will this work in Unity/Unreal" question. |
 
 ## What this toolset does not do well
 
@@ -252,3 +279,8 @@ Say so rather than flailing:
   weights via the data API, rigging, UVs, animation and import/export.
 - **Retopology by hand.** `quadriflow_remesh` is automatic; there is no manual
   retopo tooling.
+- **Moving the viewport.** There is no orbit/pan/zoom tool. The view is wherever
+  the user left it. To see a specific angle, either `add_camera` at the position
+  you need and `viewport_screenshot(camera_view=True)`, or ask the user to orbit
+  and tell you when they are done. This matters when stroke points come back in
+  `dropped_points` (they projected off-screen) or a heatmap region faces away.
