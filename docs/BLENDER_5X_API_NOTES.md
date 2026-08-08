@@ -177,3 +177,36 @@ raising.
   only appears once the bundled `cycles` add-on is enabled — enable it before setting
   the engine.
 * `bpy.types.Context.temp_override` and `bpy.app.timers` both present.
+
+## 8. Discovered while building (all verified live on 5.2)
+
+* **Unified paint settings moved.** `ToolSettings.unified_paint_settings` does not
+  exist. They are per paint mode: `tool_settings.sculpt.unified_paint_settings`,
+  `tool_settings.weight_paint.unified_paint_settings`. When `use_unified_size` is
+  on, writing `brush.size` is silently ignored.
+* **`Action.fcurves` is gone** — Blender 4.4+ *slotted actions*. Curves live at
+  `action.layers[].strips[].channelbags[].fcurves`, and a channelbag belongs to an
+  `ActionSlot` (an object's is `obj.animation_data.action_slot`). Legacy actions
+  still expose `.fcurves`, so `handlers/anim.py::iter_fcurves` handles both.
+* **Sculpt-session operators SEGFAULT under `--background`.** Not "fail" — they
+  take the whole process down, losing unsaved work. Confirmed for
+  `paint.mask_flood_fill`, `sculpt.mask_filter`, `sculpt.mask_from_cavity`,
+  `sculpt.face_sets_init`, `sculpt.face_sets_create`,
+  `sculpt.face_set_change_visibility`, `sculpt.mesh_filter`. They are all
+  `needs_gui=True` and guarded by `_require_sculpt_session()` **before** the
+  operator is invoked. `object.voxel_remesh` also crashes if called from Sculpt
+  Mode headless — the handler drops to Object Mode first.
+* **Manifest permission reasons are capped at 64 characters.** Blender's own
+  builder rejects longer ones: *"a value no longer than 64 characters expected"*.
+* **`bpy.data.libraries.load()` refuses the currently-open .blend** with
+  "Cannot load from the current blend file".
+* **Frame range assignment self-clamps.** Setting `frame_start` above
+  `frame_end` silently drags the other value along, so an invalid range must be
+  rejected *before* assignment.
+* **`Object.bound_box` on an evaluated object still reports the original cage** —
+  rebuild bounds from the evaluated mesh's vertices for modifier-aware results.
+* **`socket.timeout` IS `TimeoutError`, which subclasses `OSError`** — an
+  `except OSError` reconnect handler will swallow command timeouts unless
+  `TimeoutError` is re-raised first (bit us in `bridge_client.call`).
+* **f-strings cannot be docstrings.** `f"""..."""` as a function's first statement
+  leaves `__doc__` as `None`, which would ship MCP tools with no description.
