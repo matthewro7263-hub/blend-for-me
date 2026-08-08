@@ -110,6 +110,11 @@ class BridgeClient:
                 try:
                     self._sock.sendall(frame)
                     response = self._read_response(msg_id, timeout)
+                except TimeoutError:
+                    # socket.timeout IS TimeoutError, which subclasses OSError.
+                    # A slow command is not a dead connection: keep the socket and
+                    # let the caller decide whether to retry with a longer budget.
+                    raise
                 except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                     self.close()
                     if attempt == 2:
@@ -144,7 +149,7 @@ class BridgeClient:
                 chunk = self._sock.recv(1 << 16)
             except socket.timeout as exc:
                 raise TimeoutError(
-                    f"Blender did not respond within {timeout:.0f}s. Long operations "
+                    f"Blender did not respond within {timeout:g}s. Long operations "
                     f"(remesh, render, quadriflow) accept a larger 'timeout' argument."
                 ) from exc
             if not chunk:
