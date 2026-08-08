@@ -20,6 +20,8 @@ MODULES = (
     "uv",
     "anim",
     "geonodes",
+    "settings",
+    "properties",
     "io",
     "docs",
 )

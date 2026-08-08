@@ -1,6 +1,6 @@
 {
  "generated_by": "skills/blender-agent-mcp/scripts/gen_tool_inventory.py",
- "tool_count": 208,
+ "tool_count": 216,
  "modules": [
   "core",
   "objects",
@@ -13,10 +13,12 @@
   "uv",
   "anim",
   "geonodes",
+  "settings",
+  "properties",
   "io",
   "docs"
  ],
- "bridge_command_count": 202,
+ "bridge_command_count": 210,
  "bridge_source": "blender-runtime",
  "tools": [
   {
@@ -4456,6 +4458,166 @@
    ]
   },
   {
+   "name": "list_custom_properties",
+   "module": "properties",
+   "summary": "List custom properties and their UI metadata on a Blender datablock.",
+   "description": "List custom properties and their UI metadata on a Blender datablock.\n\n        `target_type` supports OBJECT, OBJECT_DATA, MATERIAL, COLLECTION, WORLD,\n        SCENE, ACTION, NODE_GROUP, ARMATURE, CAMERA, LIGHT and IMAGE. `target` is\n        the datablock name; omit it for the current SCENE or active World.\n\n        Use custom properties for shot IDs, asset status, dialogue cues, rig\n        controls and driver inputs that must survive saving the .blend file.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "target_type",
+     "type": "string",
+     "required": false,
+     "default": "OBJECT",
+     "description": ""
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "default": 500,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "remove_custom_property",
+   "module": "properties",
+   "summary": "Remove one custom property and return its previous value.",
+   "description": "Remove one custom property and return its previous value.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "key",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "target_type",
+     "type": "string",
+     "required": false,
+     "default": "OBJECT",
+     "description": ""
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "set_custom_property",
+   "module": "properties",
+   "summary": "Create or update a persistent custom property on a Blender datablock.",
+   "description": "Create or update a persistent custom property on a Blender datablock.\n\n        Values may be booleans, numbers, strings, numeric arrays or nested\n        dictionaries. Numeric UI metadata makes rig controls pleasant in Blender's\n        Custom Properties panel and gives drivers a documented range.\n\n        Example: put `mood=0.7` on a character object with min=0, max=1, then use\n        `add_driver` to drive a material or shape key from that property.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "key",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "value",
+     "type": "any",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "target_type",
+     "type": "string",
+     "required": false,
+     "default": "OBJECT",
+     "description": ""
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "description",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "subtype",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "min",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "max",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "soft_min",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "soft_max",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "step",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "precision",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "default",
+     "type": "any",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
    "name": "add_bone_constraint",
    "module": "rig",
    "summary": "Add any bone constraint type and set its properties generically.",
@@ -6451,6 +6613,400 @@
     {
      "name": "object",
      "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "get_blender_settings",
+   "module": "settings",
+   "summary": "Read the persistent production settings for the current scene.",
+   "description": "Read the persistent production settings for the current scene.\n\n        Returns timeline/FPS, render engine and dimensions, output encoding,\n        color management, units, and World background in one call. Use this before\n        changing production settings so a prompt does not accidentally turn a\n        portrait scene into landscape or overwrite an established output path.",
+   "needs_gui": false,
+   "params": []
+  },
+  {
+   "name": "set_color_management",
+   "module": "settings",
+   "summary": "Set the scene's display transform, look, exposure and white balance.",
+   "description": "Set the scene's display transform, look, exposure and white balance.\n\n        Enum availability depends on the active OpenColorIO configuration. Read\n        `get_blender_settings` first and use Blender's exact spelling (commonly\n        AgX with a Medium/High Contrast look). Exposure is measured in stops.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "display_device",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "view_transform",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "look",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "exposure",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "gamma",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_white_balance",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "white_balance_temperature",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "white_balance_tint",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "set_render_settings",
+   "module": "settings",
+   "summary": "Persist render, output and timeline settings for stills or animation.",
+   "description": "Persist render, output and timeline settings for stills or animation.\n\n        Args:\n            engine: BLENDER_EEVEE or CYCLES. CYCLES enables Metal GPU when available.\n            resolution: [width, height] pixels; percentage scales both at render time.\n            filepath: Blender output path/prefix. This configures future renders;\n                it does not render or overwrite a file itself.\n            file_format: PNG, OPEN_EXR, JPEG, FFMPEG, etc.\n            ffmpeg_format: MPEG4, MATROSKA, QUICKTIME, etc. Used with FFMPEG.\n            video_codec / audio_codec: Blender FFmpeg enum ids such as H264 / AAC.\n            frame_start / frame_end / frame_step: Animation output range.\n            fps_base: 1.001 with fps=30 produces 29.97 fps.\n\n        Call `get_blender_settings` afterwards when building a reusable render\n        recipe. `render_frame` intentionally restores temporary overrides; this\n        tool is the persistent counterpart.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "engine",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "resolution",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "percentage",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "pixel_aspect",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "samples",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "film_transparent",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_motion_blur",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_compositing",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_sequencer",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "filepath",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "file_format",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "color_mode",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "color_depth",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "compression",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "quality",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "ffmpeg_format",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "video_codec",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "audio_codec",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "video_bitrate",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "audio_bitrate",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_start",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_end",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "frame_step",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "fps",
+     "type": "integer",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "fps_base",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_overwrite",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_file_extension",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "set_unit_settings",
+   "module": "settings",
+   "summary": "Set measurement units without changing existing object coordinates.",
+   "description": "Set measurement units without changing existing object coordinates.\n\n        `system` is NONE, METRIC or IMPERIAL. `scale_length=1` means one Blender\n        unit represents one metre in a metric scene. This affects display and many\n        simulations/exporters; it does not rescale existing geometry.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "system",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "system_rotation",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "scale_length",
+     "type": "number",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "length_unit",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "mass_unit",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "time_unit",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "temperature_unit",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_separate",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "set_world_settings",
+   "module": "settings",
+   "summary": "Create/select a World and tune its viewport and shader background.",
+   "description": "Create/select a World and tune its viewport and shader background.\n\n        Args:\n            color: [r,g,b] viewport World color.\n            surface_color: [r,g,b] or [r,g,b,a] Background shader color.\n            strength: Background shader strength; 1 is neutral, 0 is black.\n            make_active: Assign this World to the current scene.\n\n        This is the fast environment-lighting control. For HDRI lighting, build a\n        World node graph with `execute_python` until the dedicated world-graph API\n        lands; material shader graphs already have dedicated tools.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "create",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    },
+    {
+     "name": "make_active",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    },
+    {
+     "name": "color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "use_nodes",
+     "type": "boolean",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "surface_color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "strength",
+     "type": "number",
      "required": false,
      "default": null,
      "description": ""
@@ -9172,6 +9728,27 @@
    "doc": "Round-trip liveness check."
   },
   {
+   "command": "properties.list",
+   "module": "properties",
+   "mutates": false,
+   "needs_gui": false,
+   "doc": "List custom ID properties and UI metadata on a Blender datablock."
+  },
+  {
+   "command": "properties.remove",
+   "module": "properties",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Remove one custom ID property."
+  },
+  {
+   "command": "properties.set",
+   "module": "properties",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Create/update one custom ID property and optional UI limits/description."
+  },
+  {
    "command": "redo",
    "module": "core",
    "mutates": false,
@@ -9541,6 +10118,41 @@
    "mutates": false,
    "needs_gui": false,
    "doc": "Switch the active object into OBJECT/EDIT/SCULPT/POSE/WEIGHT_PAINT/... mode."
+  },
+  {
+   "command": "settings.get",
+   "module": "settings",
+   "mutates": false,
+   "needs_gui": false,
+   "doc": "Read persistent scene, render, output, color, unit and world settings."
+  },
+  {
+   "command": "settings.set_color_management",
+   "module": "settings",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Set display transform, look, exposure, gamma and white balance."
+  },
+  {
+   "command": "settings.set_render",
+   "module": "settings",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Configure render engine, dimensions, output encoding and timeline."
+  },
+  {
+   "command": "settings.set_units",
+   "module": "settings",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Set scene measurement units and scale."
+  },
+  {
+   "command": "settings.set_world",
+   "module": "settings",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Create/select a World and set viewport color plus shader background."
   },
   {
    "command": "shading.add_node",

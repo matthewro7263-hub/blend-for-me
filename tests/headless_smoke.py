@@ -127,6 +127,29 @@ def main() -> None:
     run("list_objects", {"type_filter": "MESH"}, check=lambda r: r["count"] >= 2)
     run("get_object_info", {"name": "NoSuchObject"}, expect=KeyError)
 
+    section("settings + custom properties")
+    run("settings.get", check=lambda r: r["render"]["resolution"][0] > 0)
+    run("settings.set_render", {
+        "resolution": [960, 540], "percentage": 50, "file_format": "PNG",
+        "frame_start": 1, "frame_end": 48, "fps": 24,
+    }, check=lambda r: r["render"]["resolution"] == [960, 540]
+        and r["frame"]["end"] == 48)
+    run("settings.set_units", {"system": "METRIC", "scale_length": 1.0},
+        check=lambda r: r["system"] == "METRIC")
+    run("settings.set_world", {
+        "name": "SmokeWorld", "surface_color": [0.05, 0.08, 0.12, 1.0],
+        "strength": 0.75,
+    }, check=lambda r: r["name"] == "SmokeWorld" and abs(r["strength"] - 0.75) < 1e-6)
+    run("properties.set", {
+        "target_type": "OBJECT", "target": "SmokeCube", "key": "shot_role",
+        "value": "hero_prop", "description": "Production role",
+    }, check=lambda r: r["value"] == "hero_prop")
+    run("properties.list", {"target_type": "OBJECT", "target": "SmokeCube"},
+        check=lambda r: any(p["key"] == "shot_role" for p in r["properties"]))
+    run("properties.remove", {
+        "target_type": "OBJECT", "target": "SmokeCube", "key": "shot_role",
+    }, check=lambda r: r["removed"] == "shot_role")
+
     section("bridge parameter validation")
     run_bridge(
         "objects.set_visibility",

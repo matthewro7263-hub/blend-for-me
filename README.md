@@ -195,6 +195,8 @@ gotchas — that documentation is the interface agents actually read.
 | `uv` | seams, unwrap, smart project, pack islands, UV stats |
 | `anim` | frames, fps, keyframes, interpolation, actions, NLA, playblast |
 | `geonodes` | geometry-nodes modifier and node-group construction |
+| `settings` | persistent render/output, color management, units and World lighting |
+| `properties` | custom ID properties for metadata, rig controls and driver inputs |
 | `io` | OBJ / FBX / glTF / USD / STL / PLY / Alembic import & export, blend save/open/append |
 | `docs` | manual + Python API search via intersphinx, page fetch, tutorial search, caching |
 

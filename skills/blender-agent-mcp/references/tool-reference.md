@@ -4725,6 +4725,101 @@ geonodes_set_input(modifier="Scatter", input="Density", value=24.0, object="Terr
 
 ---
 
+## settings
+
+5 tools for persistent production configuration. Unlike `render_frame`, which
+temporarily overrides and restores settings, these calls deliberately change the
+scene for later still and animation renders.
+
+### get_blender_settings
+
+Read timeline, render engine/dimensions, output encoding, color management,
+units, and World background in one snapshot.
+
+```python
+get_blender_settings()
+```
+
+### set_render_settings
+
+Persist render engine, dimensions, samples, output encoding, FFmpeg settings and
+the animation frame range. CYCLES enables Metal GPU compute when available.
+
+```python
+set_render_settings(engine="BLENDER_EEVEE", resolution=[1920, 1080],
+                    frame_start=1, frame_end=240, fps=24,
+                    filepath="/projects/show/renders/shot_010_",
+                    file_format="PNG", color_depth="16")
+```
+
+For an MP4 preview/output, use `file_format="FFMPEG"`,
+`ffmpeg_format="MPEG4"`, `video_codec="H264"`, and `audio_codec="AAC"`.
+
+### set_color_management
+
+Set display device, view transform, look, exposure, gamma and white balance.
+OpenColorIO enum names vary by configuration, so inspect
+`get_blender_settings()` first and use the exact available spelling.
+
+```python
+set_color_management(view_transform="AgX", look="AgX - Medium High Contrast",
+                     exposure=0.5)
+```
+
+### set_unit_settings
+
+Set measurement display and scene scale. This does not rescale existing objects.
+
+```python
+set_unit_settings(system="METRIC", scale_length=1.0, length_unit="METERS")
+```
+
+### set_world_settings
+
+Create/select a World and set its viewport color plus Background shader color
+and strength.
+
+```python
+set_world_settings(name="Night", surface_color=[0.015, 0.025, 0.08, 1],
+                   strength=0.3, make_active=True)
+```
+
+---
+
+## properties
+
+3 tools for persistent custom properties on objects and other Blender IDs.
+Supported targets: OBJECT, OBJECT_DATA, MATERIAL, COLLECTION, WORLD, SCENE,
+ACTION, NODE_GROUP, ARMATURE, CAMERA, LIGHT and IMAGE.
+
+### list_custom_properties
+
+List values and UI metadata for a target datablock.
+
+```python
+list_custom_properties(target_type="OBJECT", target="Hero")
+```
+
+### set_custom_property
+
+Create/update a JSON-like custom property. Numeric UI metadata makes the value a
+usable rig control and documents safe driver ranges.
+
+```python
+set_custom_property(target_type="OBJECT", target="Hero", key="emotion",
+                    value=0.5, min=0, max=1, description="Performance intensity")
+```
+
+### remove_custom_property
+
+Remove one property and return its previous value.
+
+```python
+remove_custom_property(target_type="OBJECT", target="Hero", key="emotion")
+```
+
+---
+
 ## io
 
 6 tools. Import, export and .blend file operations. `open_blend` and `save_blend` over an existing file need `confirm: true` AND the user's explicit OK.
