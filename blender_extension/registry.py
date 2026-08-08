@@ -39,45 +39,99 @@ def accepted_params(fn) -> set:
     except (OSError, TypeError, SyntaxError, IndentationError):
         return set()
 
-    keys: set = set()
-    dynamic = False
+    visitor = _ParamVisitor(getattr(fn, "__globals__", {}))
+    visitor.visit(tree)
+    return set() if visitor.dynamic else visitor.keys
 
-    # Handlers commonly loop `for key in SOME_CONSTANT: params.get(key)`. The
-    # constant lives in the handler module's globals, so those keys are
-    # recoverable rather than an unknowable dynamic access.
-    loop_vars: dict = {}
-    namespace = getattr(fn, "__globals__", {})
-    for node in ast.walk(tree):
-        if isinstance(node, ast.For) and isinstance(node.target, ast.Name) \
-                and isinstance(node.iter, ast.Name):
-            candidate = namespace.get(node.iter.id)
-            if isinstance(candidate, (set, frozenset, list, tuple)) \
-                    and candidate and all(isinstance(x, str) for x in candidate):
-                loop_vars[node.target.id] = set(candidate)
 
-    for node in ast.walk(tree):
-        # params["key"] and params.get("key")
-        if isinstance(node, ast.Subscript) and _is_params(node.value):
-            if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
-                keys.add(node.slice.value)
-            elif isinstance(node.slice, ast.Name) and node.slice.id in loop_vars:
-                keys |= loop_vars[node.slice.id]
-            else:
-                dynamic = True
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                and _is_params(node.func.value):
+class _ParamVisitor(ast.NodeVisitor):
+    """Collect literal ``params`` keys without claiming incomplete coverage.
+
+    A handler that passes the whole params dict to a helper is dynamic from this
+    function's point of view. Validation must be disabled for that command: a
+    partial allowlist rejects valid calls before the helper gets to read them.
+
+    Loop bindings are tracked lexically. The previous global map confused two
+    different loops that both happened to name their variable ``key``; in
+    ``objects.set_visibility`` that made ray-visibility names stand in for
+    ``hide_viewport`` / ``hide_render`` and rejected both real arguments.
+    """
+
+    def __init__(self, namespace: dict):
+        self.namespace = namespace
+        self.keys: set[str] = set()
+        self.dynamic = False
+        self._loop_scopes: list[dict[str, set[str] | None]] = []
+
+    def _constant_strings(self, node) -> set[str] | None:
+        if not isinstance(node, ast.Name):
+            return None
+        candidate = self.namespace.get(node.id)
+        if isinstance(candidate, (set, frozenset, list, tuple)) \
+                and candidate and all(isinstance(x, str) for x in candidate):
+            return set(candidate)
+        return None
+
+    def _bound_names(self, node) -> set[str]:
+        if isinstance(node, ast.Name):
+            return {node.id}
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return set().union(*(self._bound_names(item) for item in node.elts))
+        return set()
+
+    def _loop_values(self, name: str) -> set[str] | None:
+        for scope in reversed(self._loop_scopes):
+            if name in scope:
+                return scope[name]
+        return None
+
+    def _record_key(self, node) -> None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            self.keys.add(node.value)
+            return
+        if isinstance(node, ast.Name):
+            values = self._loop_values(node.id)
+            if values is not None:
+                self.keys |= values
+                return
+        self.dynamic = True
+
+    @staticmethod
+    def _contains_params(node) -> bool:
+        return any(_is_params(child) for child in ast.walk(node))
+
+    def visit_For(self, node: ast.For) -> None:
+        names = self._bound_names(node.target)
+        values = self._constant_strings(node.iter) if isinstance(node.target, ast.Name) else None
+        scope = {name: (values if len(names) == 1 else None) for name in names}
+        self.visit(node.iter)
+        self._loop_scopes.append(scope)
+        for child in node.body:
+            self.visit(child)
+        for child in node.orelse:
+            self.visit(child)
+        self._loop_scopes.pop()
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        if _is_params(node.value):
+            self._record_key(node.slice)
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and _is_params(node.func.value):
             if node.func.attr in {"get", "pop", "setdefault"} and node.args:
-                first = node.args[0]
-                if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                    keys.add(first.value)
-                elif isinstance(first, ast.Name) and first.id in loop_vars:
-                    keys |= loop_vars[first.id]
-                else:
-                    dynamic = True
-            elif node.func.attr in {"keys", "items", "values", "update"}:
-                dynamic = True
-
-    return set() if dynamic else keys
+                self._record_key(node.args[0])
+            else:
+                # Iteration, copying, updating, or an unknown dict method exposes
+                # keys this parser cannot prove complete.
+                self.dynamic = True
+        else:
+            # ``helper(params)`` and ``helper(options=params)`` are the critical
+            # cases: helpers may read keys absent from this handler's own body.
+            values = list(node.args) + [kw.value for kw in node.keywords]
+            if any(self._contains_params(value) for value in values):
+                self.dynamic = True
+        self.generic_visit(node)
 
 
 def _is_params(node) -> bool:

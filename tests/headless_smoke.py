@@ -27,7 +27,7 @@ if str(REPO) not in sys.path:
 import bpy  # noqa: E402
 
 import blender_extension  # noqa: E402
-from blender_extension import ctx, registry  # noqa: E402
+from blender_extension import bridge, ctx, registry  # noqa: E402
 
 H = registry.HANDLERS
 PASSED: list[str] = []
@@ -74,6 +74,16 @@ def run(cmd: str, params: dict | None = None, *, expect=None, check=None):
     return result
 
 
+def run_bridge(cmd: str, params: dict, *, check=None):
+    """Exercise dispatcher validation before the handler, like a real MCP call."""
+    response = bridge._execute(bridge._Job("smoke", cmd, params))
+    if check is not None and check(response):
+        PASSED.append(f"bridge:{cmd}")
+        return response
+    FAILED.append((f"bridge:{cmd}", str(response)[:500]))
+    return response
+
+
 def section(title: str) -> None:
     print(f"\n--- {title} ---", flush=True)
 
@@ -116,6 +126,33 @@ def main() -> None:
         check=lambda r: abs(r["location"][2] - 1.0) < 1e-5)
     run("list_objects", {"type_filter": "MESH"}, check=lambda r: r["count"] >= 2)
     run("get_object_info", {"name": "NoSuchObject"}, expect=KeyError)
+
+    section("bridge parameter validation")
+    run_bridge(
+        "objects.set_visibility",
+        {"object": "SmokeCube", "hide_viewport": False, "hide_render": False},
+        check=lambda r: r.get("ok") is True,
+    )
+    run_bridge(
+        "objects.delete_objects",
+        {"names": ["DefinitelyMissing"], "purge_orphan_data": False},
+        check=lambda r: r.get("ok") is True,
+    )
+    run_bridge(
+        "get_object_info",
+        {"name": "Smoke", "definitely_unknown": True},
+        check=lambda r: not r.get("ok") and "does not accept" in r.get("error", ""),
+    )
+    run_bridge(
+        "sculpt.stroke_line",
+        {"object": "Smoke", "a": [0, 0, 1], "b": [1, 0, 1],
+         "return_screenshot": True},
+        check=lambda r: not r.get("ok")
+        and "does not accept" not in r.get("error", "")
+        and "NeedsGUI" in r.get("error", ""),
+    )
+    if bpy.context.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
 
     section("mesh")
     run("mesh.stats", {"name": "Smoke"},
