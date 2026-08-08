@@ -103,8 +103,10 @@ Weight-paint brushes (`essentials_brushes-mesh_weight.blend`): `Paint`, `Blur`,
 `Brush.size` is an **INT (pixels)**. `UnifiedPaintSettings` has `size`,
 `unprojected_size`, `strength`, `weight`, and `use_unified_size` /
 `use_unified_strength` / `use_unified_weight`. **If the unified flag is on, writing
-`brush.size` silently does nothing** — write `tool_settings.unified_paint_settings.size`.
-The extension writes whichever is authoritative.
+`brush.size` silently does nothing** — write `unified_paint_settings.size` instead.
+Note those settings are **per paint mode** in 5.x (`tool_settings.sculpt.…`,
+`tool_settings.weight_paint.…`), not a shared block on `tool_settings`; see §8.
+The extension writes whichever is authoritative and reports which one it used.
 
 Automasking moved off `Brush` onto `Sculpt.mesh_automasking_settings`
 (`bpy.types.MeshAutomaskingSettings`).
