@@ -2470,7 +2470,7 @@ Rebuild the mesh as an even voxel grid. The core sculpting workflow step.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `voxel_size` | number | cell size in WORLD units — cost scales roughly cubically | `0.05` | no |
+| `voxel_size` | number | cell size in WORLD units — cost scales roughly quadratically | `0.05` | no |
 | `preserve_volume` | boolean | keep the original volume rather than shrinking | `true` | no |
 | `adaptivity` | number | 0-1; >0 simplifies flat regions | none | no |
 | `preserve_attributes` | boolean | carry mesh attributes through the remesh where possible | none | no |
@@ -2482,7 +2482,7 @@ Returns: `{object, voxel_size, vertices_before, vertices_after, faces_before, fa
 Gotchas:
 
 - DESTROYS UVs and vertex groups. Remesh BEFORE unwrapping or weighting, never after.
-- Cost scales roughly cubically. On a 2-unit object, 0.05 is a sane start, 0.02 is dense, 0.01 may produce millions of vertices and take minutes.
+- Cost scales roughly quadratically. On a 2-unit object, 0.05 is a sane start, 0.02 is dense, 0.01 may produce millions of vertices and take minutes.
 - It welds intersecting parts into one surface — that is how you build a creature from separate blobs.
 - `object.voxel_remesh()` takes no arguments; the handler writes `mesh.remesh_voxel_size` and friends first, and drops out of Sculpt Mode headless because the operator crashes there.
 

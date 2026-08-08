@@ -57,7 +57,8 @@ apply_transforms(names=["Creature"], rotation=true, scale=true)
 ```
 
 **4. Uniform sculptable density.** `voxel_size` is world units and cost scales
-roughly cubically. On this 2-unit object: 0.03 ≈ 14k verts (~2 s), 0.02 ≈ 31k
+quadratically — vertices ~= surface_area / voxel_size^2, because the remesh
+produces a surface, not a solid. On this 2-unit object: 0.03 ≈ 14k verts (~2 s), 0.02 ≈ 31k
 (~5 s), 0.01 ≈ 125k (~30 s and rarely needed for a blockout).
 
 ```
