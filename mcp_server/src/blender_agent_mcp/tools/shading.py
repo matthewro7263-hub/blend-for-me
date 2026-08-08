@@ -133,13 +133,65 @@ def register(mcp) -> None:
             limit: Cap on nodes and on links independently. `node_count` /
                 `link_count` are exact; `truncated` says whether either list was cut.
 
-        Each node reports `bl_idname` (what `add_node` takes), `type` (the RNA
-        enum), `location` in node-editor units, and every input socket with its
-        `index`, `type`, `is_linked` and `default_value`. A linked socket's
-        `default_value` is ignored at render time — the link wins.
+        Each node reports `agent_id` (stable caller-owned identity, when set),
+        `bl_idname` (what `add_node` takes), `type` (the RNA enum), `location` in
+        node-editor units, and every input socket with its `index`, `type`,
+        `is_linked` and `default_value`. A linked socket's `default_value` is
+        ignored at render time — the link wins.
         """
         return call("shading.get_node_graph", clean(material=material, limit=limit),
                     timeout=30.0)
+
+    @mcp.tool()
+    def build_node_graph(
+        material: str,
+        nodes: list[dict[str, Any]],
+        links: Optional[list[dict[str, Any]]] = None,
+        clear_existing: bool = False,
+        remove_unlisted: bool = False,
+        active: Optional[str] = None,
+    ) -> dict:
+        """Build or update a complete procedural shader in one retry-safe call.
+
+        This is the high-bandwidth alternative to dozens of `add_node`,
+        `set_node_prop` and `link_nodes` round trips. Every node has a caller-owned
+        `id`, stored on the Blender node: repeating the same call updates those
+        nodes and reuses links instead of creating `.001` duplicates.
+
+        Args:
+            material: Existing material name.
+            nodes: Node specifications. Each requires `id` and Blender `type`.
+                Optional fields are `name`, `label`, `[x,y]` `location`, `mute`,
+                `props`, `image`, `parent`, and `color_ramp`. `props` uses the same
+                property-or-input rules as `set_node_prop`. `image` is an image
+                datablock name for Image Texture nodes. `parent` is a Frame node id.
+                A `color_ramp` has `elements: [{position, color}, ...]` plus optional
+                `interpolation`, `color_mode`, and `hue_interpolation`.
+            links: Link specs with `from`, `from_socket`, `to`, and `to_socket`.
+                Endpoints prefer stable ids but may name unmanaged existing nodes.
+                Sockets accept names or integer indices. A destination's old link
+                is replaced by default; set that link's `replace=false` to refuse.
+            clear_existing: Explicitly delete every existing node first. Default
+                false adopts/updates matching ids or names and preserves user work.
+            remove_unlisted: Delete previously agent-managed nodes whose ids are
+                absent from this call. Unmanaged/user nodes are never removed.
+            active: Stable id or node name to make active (important for baking).
+
+        Example node: `{"id":"noise","type":"ShaderNodeTexNoise",
+        "location":[-600,100],"props":{"Scale":5,"Detail":3}}`.
+        Example link: `{"from":"noise","from_socket":"Fac","to":"ramp",
+        "to_socket":"Fac"}`.
+
+        Existing default nodes can be adopted by giving `name="Principled BSDF"`
+        or `name="Material Output"`. A type conflict fails before edits. The whole
+        bridge call is one Blender undo step, and the result maps stable ids to the
+        actual Blender names plus created/reused/replaced counts.
+        """
+        return call("shading.build_node_graph", clean(
+            material=material, nodes=nodes, links=links,
+            clear_existing=clear_existing, remove_unlisted=remove_unlisted,
+            active=active,
+        ), timeout=60.0)
 
     @mcp.tool()
     def add_node(
@@ -148,6 +200,7 @@ def register(mcp) -> None:
         props: Optional[dict[str, Any]] = None,
         location: Optional[list[float]] = None,
         label: Optional[str] = None,
+        agent_id: Optional[str] = None,
     ) -> dict:
         """Add one shader node to a material, optionally configured in the same call.
 
@@ -169,12 +222,15 @@ def register(mcp) -> None:
                 cosmetic. Omit and the node lands at the origin, which usually
                 means on top of another node.
             label: Text shown on the node header. Handy for finding it again.
+            agent_id: Optional caller-stable identity. Once set, every node command
+                accepts this id in place of Blender's auto-numbered display name.
 
         Returns the assigned `node` name — pass that to `link_nodes` and
         `set_node_prop`, since it may differ from the default if one already existed.
         """
         return call("shading.add_node", clean(
             material=material, type=type, props=props, location=location, label=label,
+            agent_id=agent_id,
         ))
 
     @mcp.tool()
@@ -292,6 +348,87 @@ def register(mcp) -> None:
         return call("shading.load_image_texture", clean(
             material=material, path=path, colorspace=colorspace,
             hook_to=hook_to, image_name=image_name,
+        ), timeout=60.0)
+
+    @mcp.tool()
+    def create_texture_image(
+        name: str,
+        width: int = 1024,
+        height: int = 1024,
+        color: Optional[list[float]] = None,
+        generated_type: str = "BLANK",
+        colorspace: Optional[str] = None,
+        alpha: bool = True,
+        float_buffer: bool = False,
+        is_data: bool = False,
+        pixels: Optional[list[float]] = None,
+        reuse_existing: bool = True,
+    ) -> dict:
+        """Create an internal texture, mask, bake target, grid, or small pixel image.
+
+        Args:
+            name: Stable image datablock name. A matching image is safely reused on
+                retry; a size/precision mismatch fails instead of breaking users.
+            width: Pixel width, 1-16384. Total pixels are capped at 67,108,864.
+            height: Pixel height, 1-16384.
+            color: Background RGBA 0-1 (RGB is padded with alpha 1).
+            generated_type: `BLANK`, `UV_GRID`, or `COLOR_GRID`.
+            colorspace: Usually `sRGB` for visible colour or `Non-Color` for masks,
+                roughness, metallic, normals and other numeric data. Defaults from
+                `is_data`.
+            alpha: Allocate alpha storage.
+            float_buffer: Use a 32-bit float/HDR buffer. Costs much more memory.
+            is_data: Mark numeric data rather than display colour.
+            pixels: Optional flat RGBA values in bottom-to-top row order, exactly
+                `width*height*4` numbers. Best for small masks, pixel art, sprite
+                sheets and generated lookup textures; use files for large images.
+            reuse_existing: Retry-safe default. False refuses if `name` exists.
+
+        Generated images are already stored inside the blend. Save one externally
+        with `save_image`, then reference its datablock from `build_node_graph` via
+        a node's `image` field.
+        """
+        return call("shading.create_texture_image", clean(
+            name=name, width=width, height=height, color=color,
+            generated_type=generated_type, colorspace=colorspace, alpha=alpha,
+            float_buffer=float_buffer, is_data=is_data, pixels=pixels,
+            reuse_existing=reuse_existing,
+        ), timeout=60.0)
+
+    @mcp.tool()
+    def list_images(limit: int = 1000) -> dict:
+        """List image datablocks with size, source, path, colorspace and packed state.
+
+        Use this before assigning a node's `image` property. `source="GENERATED"`
+        means the image lives inside Blender; `source="FILE"` means `filepath`
+        identifies an external texture. `is_dirty` warns about unsaved pixel edits.
+        """
+        return call("shading.list_images", {"limit": limit}, timeout=30.0)
+
+    @mcp.tool()
+    def save_image(
+        image: str,
+        path: str,
+        file_format: Optional[str] = None,
+        pack: bool = False,
+    ) -> dict:
+        """Save an image datablock to disk as a reusable texture file.
+
+        Args:
+            image: Image name from `list_images`.
+            path: Absolute or Blender `//relative` destination. Parent directories
+                are created. Include the intended extension.
+            file_format: Optional Blender format such as `PNG`, `JPEG`, `OPEN_EXR`,
+                `TIFF`, `TARGA`, `HDR` or `WEBP`. Omit to use the image/current
+                extension-derived format.
+            pack: Also embed the saved external file into the blend. Generated
+                images are already internal and do not need this.
+
+        Returns the resolved path and byte count, so an agent can verify the file
+        was actually written instead of assuming Blender saved it.
+        """
+        return call("shading.save_image", clean(
+            image=image, path=path, file_format=file_format, pack=pack,
         ), timeout=60.0)
 
     # -- viewport ------------------------------------------------------

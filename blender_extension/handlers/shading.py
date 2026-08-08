@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import difflib
+import math
 import os
 import tempfile
 
@@ -27,6 +28,12 @@ _RENAMED_SOCKETS = {
     "Emission Strength": "Emission Strength",
     "Transmission Roughness": None,  # dropped entirely in 4.x
 }
+
+# Caller-owned identity for node graphs. Blender's display names are not stable:
+# adding a second "Noise Texture" silently renames it to "Noise Texture.001".
+# Keeping the agent id on the node makes large graph builds retry-safe and lets
+# every existing single-node command address the same node later by that id.
+_AGENT_ID_PROP = "_blender_agent_id"
 
 
 # ---------------------------------------------------------------------------
@@ -53,12 +60,23 @@ def _tree(mat):
 
 def _node(tree, name: str):
     node = tree.nodes.get(name)
-    if node is None:
-        raise KeyError(
-            f"node {name!r} not in this material; nodes are "
-            f"{[n.name for n in tree.nodes]}"
+    if node is not None:
+        return node
+
+    matches = [n for n in tree.nodes if n.get(_AGENT_ID_PROP) == name]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"agent node id {name!r} is duplicated by {[n.name for n in matches]}; "
+            "give those nodes unique ids before editing the graph"
         )
-    return node
+    if not matches:
+        raise KeyError(
+            f"node name or agent id {name!r} not in this material; nodes are "
+            f"{[n.name for n in tree.nodes]} and agent ids are "
+            f"{[n.get(_AGENT_ID_PROP) for n in tree.nodes if n.get(_AGENT_ID_PROP)]}"
+        )
 
 
 def _principled(tree):
@@ -115,6 +133,7 @@ def _socket_value(sock):
 def _node_brief(node) -> dict:
     return {
         "name": node.name,
+        "agent_id": node.get(_AGENT_ID_PROP),
         "bl_idname": node.bl_idname,
         "type": node.type,
         "label": node.label,
@@ -128,6 +147,122 @@ def _node_brief(node) -> dict:
         "outputs": [
             {"index": i, "name": s.name, "type": s.type, "is_linked": s.is_linked}
             for i, s in enumerate(node.outputs)
+        ],
+    }
+
+
+def _image_brief(img) -> dict:
+    """Compact, JSON-safe description of an image datablock."""
+    packed_files = getattr(img, "packed_files", ())
+    return {
+        "name": img.name,
+        "size": list(img.size),
+        "source": img.source,
+        "filepath": img.filepath,
+        "colorspace": img.colorspace_settings.name,
+        "alpha_mode": img.alpha_mode,
+        "is_float": img.is_float,
+        # Blender 5.2 still accepts is_data when creating an image but no longer
+        # exposes Image.is_data. Non-Color is the durable observable state.
+        "is_data": img.colorspace_settings.name == "Non-Color",
+        "is_dirty": img.is_dirty,
+        "packed": bool(getattr(img, "packed_file", None)) or bool(len(packed_files)),
+        "users": img.users,
+    }
+
+
+def _validate_shader_node_type(node_type: str) -> None:
+    if not isinstance(node_type, str) or not node_type:
+        raise TypeError("each node type must be a non-empty Blender bl_idname string")
+    cls = getattr(bpy.types, node_type, None)
+    if cls is not None:
+        try:
+            if issubclass(cls, bpy.types.ShaderNode) or node_type in {
+                "NodeFrame", "NodeReroute"
+            }:
+                return
+        except TypeError:
+            pass
+    known = [n for n in dir(bpy.types) if n.startswith("ShaderNode")]
+    known.extend(["NodeFrame", "NodeReroute"])
+    close = difflib.get_close_matches(node_type, known, n=5, cutoff=0.4)
+    raise ValueError(
+        f"{node_type!r} is not a shader node type in this Blender build. "
+        "Use a bl_idname such as 'ShaderNodeTexNoise' or "
+        "'ShaderNodeBsdfPrincipled'."
+        + (f" Did you mean: {close}?" if close else "")
+    )
+
+
+def _validate_color(color, *, label: str) -> list[float]:
+    try:
+        result = [float(component) for component in color]
+    except (TypeError, ValueError):
+        raise TypeError(f"{label} must be an RGB or RGBA number list") from None
+    if len(result) == 3:
+        result.append(1.0)
+    if len(result) != 4 or not all(math.isfinite(value) for value in result):
+        raise ValueError(f"{label} must contain 3 or 4 finite numbers")
+    return result
+
+
+def _apply_color_ramp(node, spec: dict) -> dict:
+    """Replace a Color Ramp node's stops and configure interpolation."""
+    ramp = getattr(node, "color_ramp", None)
+    if ramp is None:
+        raise TypeError(
+            f"node {node.name!r} ({node.bl_idname}) has no color_ramp; "
+            "use ShaderNodeValToRGB for a Color Ramp"
+        )
+    if not isinstance(spec, dict):
+        raise TypeError("color_ramp must be an object with an elements list")
+
+    elements = spec.get("elements")
+    if not isinstance(elements, list) or len(elements) < 2:
+        raise ValueError("color_ramp.elements must contain at least two stops")
+
+    wanted = []
+    for index, item in enumerate(elements):
+        if not isinstance(item, dict) or "position" not in item or "color" not in item:
+            raise ValueError(
+                f"color_ramp.elements[{index}] needs position and color"
+            )
+        position = float(item["position"])
+        if not math.isfinite(position) or not 0.0 <= position <= 1.0:
+            raise ValueError(
+                f"color_ramp.elements[{index}].position must be between 0 and 1"
+            )
+        wanted.append((position, _validate_color(
+            item["color"], label=f"color_ramp.elements[{index}].color"
+        )))
+    wanted.sort(key=lambda item: item[0])
+
+    for attr in ("color_mode", "hue_interpolation", "interpolation"):
+        if attr in spec:
+            try:
+                setattr(ramp, attr, str(spec[attr]).upper())
+            except TypeError:
+                prop = ramp.bl_rna.properties[attr]
+                valid = [item.identifier for item in prop.enum_items]
+                raise ValueError(
+                    f"color_ramp.{attr}={spec[attr]!r} is invalid; valid: {valid}"
+                ) from None
+
+    while len(ramp.elements) > 2:
+        ramp.elements.remove(ramp.elements[-1])
+    ramp.elements[0].position, ramp.elements[0].color = wanted[0]
+    ramp.elements[1].position, ramp.elements[1].color = wanted[-1]
+    for position, color in wanted[1:-1]:
+        element = ramp.elements.new(position)
+        element.color = color
+
+    return {
+        "color_mode": ramp.color_mode,
+        "hue_interpolation": ramp.hue_interpolation,
+        "interpolation": ramp.interpolation,
+        "elements": [
+            {"position": element.position, "color": list(element.color)}
+            for element in ramp.elements
         ],
     }
 
@@ -466,6 +601,326 @@ def get_node_graph(params: dict) -> dict:
     }
 
 
+@command("shading.build_node_graph", mutates=True)
+def build_node_graph(params: dict) -> dict:
+    """Create or update a complete shader graph using caller-stable node ids."""
+    mat = _material(params["material"])
+    tree = _tree(mat)
+    node_specs = params["nodes"]
+    link_specs = params.get("links") or []
+    clear_existing = bool(params.get("clear_existing", False))
+    remove_unlisted = bool(params.get("remove_unlisted", False))
+
+    if not isinstance(node_specs, list) or not node_specs:
+        raise ValueError("nodes must be a non-empty list")
+    if len(node_specs) > 500:
+        raise ValueError("one graph build is limited to 500 nodes")
+    if not isinstance(link_specs, list):
+        raise TypeError("links must be a list")
+    if len(link_specs) > 2000:
+        raise ValueError("one graph build is limited to 2000 links")
+
+    normalized: list[dict] = []
+    ids: set[str] = set()
+    for index, spec in enumerate(node_specs):
+        if not isinstance(spec, dict):
+            raise TypeError(f"nodes[{index}] must be an object")
+        agent_id = spec.get("id")
+        node_type = spec.get("type")
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            raise ValueError(f"nodes[{index}].id must be a non-empty string")
+        if agent_id in ids:
+            raise ValueError(f"duplicate node id {agent_id!r}")
+        ids.add(agent_id)
+        _validate_shader_node_type(node_type)
+
+        location = spec.get("location")
+        if location is not None and (
+            not isinstance(location, (list, tuple)) or len(location) != 2
+        ):
+            raise ValueError(f"nodes[{index}].location must be [x, y]")
+        props = spec.get("props")
+        if props is not None and not isinstance(props, dict):
+            raise TypeError(f"nodes[{index}].props must be an object")
+        image_name = spec.get("image")
+        if image_name is not None and bpy.data.images.get(image_name) is None:
+            raise KeyError(
+                f"nodes[{index}].image names missing datablock {image_name!r}; "
+                "use shading.create_texture_image or shading.load_image_texture first"
+            )
+        ramp = spec.get("color_ramp")
+        if ramp is not None:
+            # Structural validation happens before clear_existing so malformed
+            # stops cannot destroy an existing graph.
+            if node_type != "ShaderNodeValToRGB":
+                raise TypeError(
+                    f"nodes[{index}].color_ramp requires type='ShaderNodeValToRGB'"
+                )
+            if not isinstance(ramp, dict):
+                raise TypeError(f"nodes[{index}].color_ramp must be an object")
+            elements = ramp.get("elements")
+            if not isinstance(elements, list) or len(elements) < 2:
+                raise ValueError(
+                    f"nodes[{index}].color_ramp.elements needs at least two stops"
+                )
+            for stop_index, stop in enumerate(elements):
+                if not isinstance(stop, dict) or "position" not in stop or "color" not in stop:
+                    raise ValueError(
+                        f"nodes[{index}].color_ramp.elements[{stop_index}] needs "
+                        "position and color"
+                    )
+                position = float(stop["position"])
+                if not math.isfinite(position) or not 0.0 <= position <= 1.0:
+                    raise ValueError(
+                        f"nodes[{index}].color_ramp.elements[{stop_index}].position "
+                        "must be between 0 and 1"
+                    )
+                _validate_color(
+                    stop["color"],
+                    label=(
+                        f"nodes[{index}].color_ramp.elements[{stop_index}].color"
+                    ),
+                )
+        normalized.append(spec)
+
+    specs_by_id = {spec["id"]: spec for spec in normalized}
+    for spec in normalized:
+        parent_ref = spec.get("parent")
+        if parent_ref is None:
+            continue
+        if not isinstance(parent_ref, str):
+            raise TypeError(f"node {spec['id']!r} parent must be a node id or name")
+        parent_spec = specs_by_id.get(parent_ref)
+        if parent_spec is not None:
+            if parent_spec["type"] != "NodeFrame":
+                raise TypeError(
+                    f"node {spec['id']!r} parent {parent_ref!r} is not a NodeFrame"
+                )
+        elif clear_existing:
+            raise KeyError(
+                f"node {spec['id']!r} parent {parent_ref!r} is not in nodes, and "
+                "clear_existing removes every external node"
+            )
+        elif _node(tree, parent_ref).type != "FRAME":
+            raise TypeError(f"node {spec['id']!r} parent {parent_ref!r} is not a Frame")
+
+    for index, spec in enumerate(link_specs):
+        if not isinstance(spec, dict):
+            raise TypeError(f"links[{index}] must be an object")
+        missing = [key for key in ("from", "from_socket", "to", "to_socket")
+                   if key not in spec]
+        if missing:
+            raise ValueError(f"links[{index}] is missing {missing}")
+        if not isinstance(spec["from"], str) or not isinstance(spec["to"], str):
+            raise TypeError(f"links[{index}].from and .to must be node ids or names")
+        if clear_existing:
+            for endpoint in ("from", "to"):
+                if spec[endpoint] not in ids:
+                    raise KeyError(
+                        f"links[{index}].{endpoint}={spec[endpoint]!r} is not in nodes, "
+                        "and clear_existing removes every external node"
+                    )
+        else:
+            for endpoint in ("from", "to"):
+                if spec[endpoint] not in ids:
+                    _node(tree, spec[endpoint])
+
+    active_ref = params.get("active")
+    if active_ref is not None:
+        if not isinstance(active_ref, str):
+            raise TypeError("active must be a node id or name")
+        if active_ref not in ids:
+            if clear_existing:
+                raise KeyError(
+                    f"active node {active_ref!r} is not in nodes, and clear_existing "
+                    "removes every external node"
+                )
+            _node(tree, active_ref)
+
+    managed: dict[str, object] = {}
+    for node in tree.nodes:
+        agent_id = node.get(_AGENT_ID_PROP)
+        if not agent_id:
+            continue
+        if agent_id in managed:
+            raise RuntimeError(
+                f"existing agent node id {agent_id!r} is duplicated by "
+                f"{managed[agent_id].name!r} and {node.name!r}"
+            )
+        managed[agent_id] = node
+
+    # Fail on type conflicts before clearing or editing anything.
+    if not clear_existing:
+        claimed_existing: dict[int, str] = {}
+        for spec in normalized:
+            candidate = managed.get(spec["id"])
+            if candidate is None and spec.get("name"):
+                candidate = tree.nodes.get(spec["name"])
+            if candidate is None:
+                candidate = tree.nodes.get(spec["id"])
+            if candidate is None:
+                continue
+            old_agent_id = candidate.get(_AGENT_ID_PROP)
+            if old_agent_id and old_agent_id != spec["id"]:
+                raise ValueError(
+                    f"node {candidate.name!r} is already managed as {old_agent_id!r}; "
+                    f"cannot also adopt it as {spec['id']!r}"
+                )
+            pointer = candidate.as_pointer()
+            if pointer in claimed_existing:
+                raise ValueError(
+                    f"node specs {claimed_existing[pointer]!r} and {spec['id']!r} "
+                    f"both resolve to existing node {candidate.name!r}"
+                )
+            claimed_existing[pointer] = spec["id"]
+            if candidate.bl_idname != spec["type"]:
+                raise TypeError(
+                    f"node id {spec['id']!r} resolves to {candidate.name!r} of type "
+                    f"{candidate.bl_idname}, not requested {spec['type']}. Use a new "
+                    "id, remove the old node, or set clear_existing=true."
+                )
+
+    removed = []
+    if clear_existing:
+        for node in list(tree.nodes):
+            removed.append(node.name)
+            tree.nodes.remove(node)
+        managed.clear()
+
+    node_map: dict[str, object] = {}
+    created: list[str] = []
+    updated: list[str] = []
+    applied: dict[str, list[dict]] = {}
+    ramps: dict[str, dict] = {}
+
+    for spec in normalized:
+        agent_id = spec["id"]
+        node = managed.get(agent_id)
+        if node is None and spec.get("name"):
+            node = tree.nodes.get(spec["name"])
+        if node is None:
+            node = tree.nodes.get(agent_id)
+
+        if node is None:
+            node = tree.nodes.new(spec["type"])
+            created.append(agent_id)
+        else:
+            updated.append(agent_id)
+
+        node[_AGENT_ID_PROP] = agent_id
+        if spec.get("name") is not None:
+            node.name = str(spec["name"])
+        if "label" in spec:
+            node.label = str(spec.get("label") or "")
+        if spec.get("location") is not None:
+            node.location = tuple(float(value) for value in spec["location"])
+        if "mute" in spec:
+            node.mute = bool(spec["mute"])
+
+        records = []
+        for prop, value in (spec.get("props") or {}).items():
+            records.append(_apply_prop(node, prop, value))
+        if spec.get("image") is not None:
+            records.append(_apply_prop(node, "image", spec["image"]))
+        if records:
+            applied[agent_id] = records
+        if spec.get("color_ramp") is not None:
+            ramps[agent_id] = _apply_color_ramp(node, spec["color_ramp"])
+        node_map[agent_id] = node
+
+    # Frames/parents can only resolve after every node exists.
+    for spec in normalized:
+        parent_ref = spec.get("parent")
+        if parent_ref is None:
+            continue
+        if not isinstance(parent_ref, str):
+            raise TypeError(f"node {spec['id']!r} parent must be a node id or name")
+        parent = node_map.get(parent_ref) or _node(tree, parent_ref)
+        if parent.type != "FRAME":
+            raise TypeError(
+                f"parent {parent_ref!r} resolves to {parent.name!r}, which is not a Frame"
+            )
+        node_map[spec["id"]].parent = parent
+
+    if remove_unlisted:
+        for agent_id, node in list(managed.items()):
+            if agent_id not in ids and tree.nodes.get(node.name) == node:
+                removed.append(node.name)
+                tree.nodes.remove(node)
+
+    resolved_links = []
+    for index, spec in enumerate(link_specs):
+        from_node = node_map.get(spec["from"])
+        if from_node is None:
+            from_node = _node(tree, spec["from"])
+        to_node = node_map.get(spec["to"])
+        if to_node is None:
+            to_node = _node(tree, spec["to"])
+        from_socket = _socket(from_node, spec["from_socket"], outputs=True)
+        to_socket = _socket(to_node, spec["to_socket"], outputs=False)
+        resolved_links.append((index, spec, from_node, from_socket, to_node, to_socket))
+
+    links_created = 0
+    links_reused = 0
+    links_replaced = 0
+    link_results = []
+    for index, spec, from_node, from_socket, to_node, to_socket in resolved_links:
+        exact = next((
+            link for link in tree.links
+            if link.from_socket == from_socket and link.to_socket == to_socket
+        ), None)
+        if exact is not None:
+            link = exact
+            links_reused += 1
+        else:
+            incoming = [link for link in tree.links if link.to_socket == to_socket]
+            if incoming and not bool(spec.get("replace", True)):
+                raise RuntimeError(
+                    f"links[{index}] destination {to_node.name!r}:{to_socket.name!r} "
+                    "is already linked; omit replace=false to replace it"
+                )
+            for old in incoming:
+                tree.links.remove(old)
+                links_replaced += 1
+            link = tree.links.new(from_socket, to_socket)
+            if not link.is_valid:
+                tree.links.remove(link)
+                raise TypeError(
+                    f"links[{index}] is incompatible: {from_node.name}:"
+                    f"{from_socket.name} -> {to_node.name}:{to_socket.name}"
+                )
+            links_created += 1
+        link_results.append({
+            "from": spec["from"],
+            "from_node": from_node.name,
+            "from_socket": from_socket.name,
+            "to": spec["to"],
+            "to_node": to_node.name,
+            "to_socket": to_socket.name,
+            "valid": link.is_valid,
+        })
+
+    if active_ref is not None:
+        tree.nodes.active = node_map.get(active_ref) or _node(tree, active_ref)
+
+    return {
+        "material": mat.name,
+        "nodes": {agent_id: node.name for agent_id, node in node_map.items()},
+        "created": created,
+        "updated": updated,
+        "removed": removed,
+        "applied": applied,
+        "color_ramps": ramps,
+        "links": link_results,
+        "links_created": links_created,
+        "links_reused": links_reused,
+        "links_replaced": links_replaced,
+        "node_count": len(tree.nodes),
+        "link_count": len(tree.links),
+        "active_node": tree.nodes.active.name if tree.nodes.active else None,
+    }
+
+
 @command("shading.add_node", mutates=True)
 def add_node(params: dict) -> dict:
     """Add a shader node to a material and optionally set its props."""
@@ -473,16 +928,15 @@ def add_node(params: dict) -> dict:
     tree = _tree(mat)
     node_type = params["type"]
 
-    try:
-        node = tree.nodes.new(node_type)
-    except RuntimeError:
-        known = [n for n in dir(bpy.types) if n.startswith("ShaderNode")]
-        close = difflib.get_close_matches(node_type, known, n=5, cutoff=0.4)
-        raise ValueError(
-            f"{node_type!r} is not a shader node type in this Blender build. "
-            f"Types are bl_idnames like 'ShaderNodeTexImage' or 'ShaderNodeMixShader'."
-            + (f" Did you mean: {close}?" if close else "")
-        ) from None
+    _validate_shader_node_type(node_type)
+    node = tree.nodes.new(node_type)
+
+    agent_id = params.get("agent_id")
+    if agent_id:
+        if any(n != node and n.get(_AGENT_ID_PROP) == agent_id for n in tree.nodes):
+            tree.nodes.remove(node)
+            raise ValueError(f"agent node id {agent_id!r} already exists")
+        node[_AGENT_ID_PROP] = str(agent_id)
 
     location = params.get("location")
     if location is not None:
@@ -588,6 +1042,154 @@ def load_image_texture(params: dict) -> dict:
     hooked = _hook_texture(tree, bsdf, img, hook_to, colorspace=colorspace)
     return {"material": mat.name, "image": img.name, "filepath": img.filepath,
             "size": list(img.size), **hooked}
+
+
+@command("shading.create_texture_image", mutates=True)
+def create_texture_image(params: dict) -> dict:
+    """Create or safely reuse an internal image for textures, masks or baking."""
+    name = str(params.get("name") or "Agent Texture")
+    width = int(params.get("width", 1024))
+    height = int(params.get("height", 1024))
+    if not 1 <= width <= 16384 or not 1 <= height <= 16384:
+        raise ValueError("width and height must each be between 1 and 16384")
+    if width * height > 67_108_864:
+        raise ValueError("image is limited to 67,108,864 pixels (8192 x 8192)")
+
+    alpha = bool(params.get("alpha", True))
+    float_buffer = bool(params.get("float_buffer", False))
+    is_data = bool(params.get("is_data", False))
+    reuse_existing = bool(params.get("reuse_existing", True))
+    img = bpy.data.images.get(name)
+    reused = img is not None
+    if img is not None:
+        if not reuse_existing:
+            raise ValueError(
+                f"image {name!r} already exists; choose a new name or set "
+                "reuse_existing=true"
+            )
+        if tuple(img.size) != (width, height):
+            raise ValueError(
+                f"image {name!r} is {img.size[0]}x{img.size[1]}, not requested "
+                f"{width}x{height}; choose a new name so existing texture users are "
+                "not silently broken"
+            )
+        if bool(img.is_float) != float_buffer:
+            raise ValueError(
+                f"image {name!r} float_buffer={img.is_float}, not requested "
+                f"{float_buffer}; choose a new name"
+            )
+    else:
+        img = bpy.data.images.new(
+            name, width=width, height=height, alpha=alpha,
+            float_buffer=float_buffer, is_data=is_data,
+        )
+
+    generated_type = str(params.get("generated_type", "BLANK")).upper()
+    try:
+        img.generated_type = generated_type
+    except TypeError:
+        prop = img.bl_rna.properties["generated_type"]
+        valid = [item.identifier for item in prop.enum_items]
+        raise ValueError(f"generated_type {generated_type!r} invalid; valid: {valid}") from None
+
+    colorspace = params.get("colorspace")
+    if colorspace is None:
+        colorspace = "Non-Color" if is_data else "sRGB"
+    try:
+        img.colorspace_settings.name = colorspace
+    except TypeError:
+        valid = [item.identifier for item in
+                 img.colorspace_settings.bl_rna.properties["name"].enum_items]
+        raise ValueError(f"colorspace {colorspace!r} invalid; valid: {valid}") from None
+
+    color = _validate_color(params.get("color", [0.0, 0.0, 0.0, 1.0]), label="color")
+    img.generated_color = color
+
+    pixels = params.get("pixels")
+    pixels_written = 0
+    if pixels is not None:
+        if not isinstance(pixels, list):
+            raise TypeError("pixels must be a flat [R,G,B,A, ...] number list")
+        expected = width * height * 4
+        if len(pixels) != expected:
+            raise ValueError(
+                f"pixels needs exactly width*height*4 = {expected} values, "
+                f"got {len(pixels)}"
+            )
+        values = [float(value) for value in pixels]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("pixels must contain only finite numbers")
+        img.pixels.foreach_set(values)
+        img.update()
+        pixels_written = width * height
+
+    result = _image_brief(img)
+    result.update({
+        "created": not reused,
+        "reused": reused,
+        "generated_type": img.generated_type,
+        "generated_color": list(img.generated_color),
+        "pixels_written": pixels_written,
+        "note": (
+            "Generated images are stored inside the blend and do not need packing. "
+            "Use shading.save_image to create an external file."
+        ),
+    })
+    return result
+
+
+@command("shading.list_images")
+def list_images(params: dict) -> dict:
+    """List texture/image datablocks with file and colour-management state."""
+    limit = int(params.get("limit", 1000))
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    images = list(bpy.data.images)
+    return {
+        "count": len(images),
+        "images": [_image_brief(img) for img in images[:limit]],
+        "truncated": len(images) > limit,
+    }
+
+
+@command("shading.save_image", mutates=True)
+def save_image(params: dict) -> dict:
+    """Save an image datablock to an external texture file."""
+    image_name = params["image"]
+    img = bpy.data.images.get(image_name)
+    if img is None:
+        raise KeyError(
+            f"no image named {image_name!r}; call shading.list_images to see images"
+        )
+
+    resolved = bpy.path.abspath(params["path"])
+    if not os.path.isabs(resolved):
+        resolved = os.path.abspath(resolved)
+    os.makedirs(os.path.dirname(resolved), exist_ok=True)
+
+    file_format = params.get("file_format")
+    if file_format is not None:
+        file_format = str(file_format).upper()
+        try:
+            img.file_format = file_format
+        except TypeError:
+            valid = [item.identifier for item in
+                     img.bl_rna.properties["file_format"].enum_items]
+            raise ValueError(f"file_format {file_format!r} invalid; valid: {valid}") from None
+    img.filepath_raw = resolved
+    img.save()
+    if not os.path.isfile(resolved):
+        raise RuntimeError(f"Blender reported success but did not write {resolved!r}")
+
+    if bool(params.get("pack", False)):
+        img.pack()
+
+    return {
+        **_image_brief(img),
+        "saved_path": resolved,
+        "bytes": os.path.getsize(resolved),
+        "file_format": img.file_format,
+    }
 
 
 # ---------------------------------------------------------------------------

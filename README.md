@@ -178,7 +178,7 @@ before it commits to an approach.
 
 ## Tool catalog
 
-Roughly 200 tools across these modules. Every tool carries a docstring covering
+220 tools across these modules. Every tool carries a docstring covering
 what it does, when to use it instead of an alternative, parameter units, and its
 gotchas — that documentation is the interface agents actually read.
 
@@ -191,7 +191,7 @@ gotchas — that documentation is the interface agents actually read.
 | `sculpt` | brushes (asset-based), symmetry, real brush strokes, dyntopo, voxel/quadriflow remesh, masks, face sets, mesh filters |
 | `weights` | vertex groups, bulk weight read/write, auto weights, normalize/mirror/smooth/clean/quantize/limit, gradient, transfer, diagnostics, heatmap |
 | `rig` | armature creation, edit/pose bones, constraints, IK setup, mesh parenting, shape keys, drivers, bone collections |
-| `shading` | PBR materials, node graph read/write, image textures, viewport shading, baking |
+| `shading` | PBR materials, retry-safe batch node graphs, Color Ramps, generated/custom image textures, viewport shading, baking |
 | `uv` | seams, unwrap, smart project, pack islands, UV stats |
 | `anim` | frames, fps, keyframes, interpolation, actions, NLA, playblast |
 | `geonodes` | geometry-nodes modifier and node-group construction |

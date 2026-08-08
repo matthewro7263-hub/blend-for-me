@@ -1,6 +1,6 @@
 {
  "generated_by": "skills/blender-agent-mcp/scripts/gen_tool_inventory.py",
- "tool_count": 216,
+ "tool_count": 220,
  "modules": [
   "core",
   "objects",
@@ -18,7 +18,7 @@
   "io",
   "docs"
  ],
- "bridge_command_count": 210,
+ "bridge_command_count": 214,
  "bridge_source": "blender-runtime",
  "tools": [
   {
@@ -7017,7 +7017,7 @@
    "name": "add_node",
    "module": "shading",
    "summary": "Add one shader node to a material, optionally configured in the same call.",
-   "description": "Add one shader node to a material, optionally configured in the same call.\n\n        The node is created disconnected \u2014 wire it up with `link_nodes`.\n\n        Args:\n            material: Material name.\n            type: The node's `bl_idname`, e.g. `ShaderNodeTexImage`,\n                `ShaderNodeTexNoise`, `ShaderNodeMapping`, `ShaderNodeMixShader`,\n                `ShaderNodeBump`, `ShaderNodeColorRamp`. Not the UI label, and not\n                the short `type` enum. A wrong name raises with close matches from\n                the live build, so a near-miss self-corrects in one retry.\n            props: Node settings applied after creation. Each key is tried first\n                as a node **attribute** (`noise_dimensions`, `projection`,\n                `interpolation`, `image`) and then as an **input socket**\n                (`Scale`, `Detail`, `Roughness`). See `set_node_prop` for value\n                rules. A pointer attribute like `image` accepts a datablock name.\n            location: [x, y] in node-editor units, +x right and +y up. Purely\n                cosmetic. Omit and the node lands at the origin, which usually\n                means on top of another node.\n            label: Text shown on the node header. Handy for finding it again.\n\n        Returns the assigned `node` name \u2014 pass that to `link_nodes` and\n        `set_node_prop`, since it may differ from the default if one already existed.",
+   "description": "Add one shader node to a material, optionally configured in the same call.\n\n        The node is created disconnected \u2014 wire it up with `link_nodes`.\n\n        Args:\n            material: Material name.\n            type: The node's `bl_idname`, e.g. `ShaderNodeTexImage`,\n                `ShaderNodeTexNoise`, `ShaderNodeMapping`, `ShaderNodeMixShader`,\n                `ShaderNodeBump`, `ShaderNodeColorRamp`. Not the UI label, and not\n                the short `type` enum. A wrong name raises with close matches from\n                the live build, so a near-miss self-corrects in one retry.\n            props: Node settings applied after creation. Each key is tried first\n                as a node **attribute** (`noise_dimensions`, `projection`,\n                `interpolation`, `image`) and then as an **input socket**\n                (`Scale`, `Detail`, `Roughness`). See `set_node_prop` for value\n                rules. A pointer attribute like `image` accepts a datablock name.\n            location: [x, y] in node-editor units, +x right and +y up. Purely\n                cosmetic. Omit and the node lands at the origin, which usually\n                means on top of another node.\n            label: Text shown on the node header. Handy for finding it again.\n            agent_id: Optional caller-stable identity. Once set, every node command\n                accepts this id in place of Blender's auto-numbered display name.\n\n        Returns the assigned `node` name \u2014 pass that to `link_nodes` and\n        `set_node_prop`, since it may differ from the default if one already existed.",
    "needs_gui": false,
    "params": [
     {
@@ -7050,6 +7050,13 @@
     },
     {
      "name": "label",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "agent_id",
      "type": "string",
      "required": false,
      "default": null,
@@ -7188,6 +7195,57 @@
    ]
   },
   {
+   "name": "build_node_graph",
+   "module": "shading",
+   "summary": "Build or update a complete procedural shader in one retry-safe call.",
+   "description": "Build or update a complete procedural shader in one retry-safe call.\n\n        This is the high-bandwidth alternative to dozens of `add_node`,\n        `set_node_prop` and `link_nodes` round trips. Every node has a caller-owned\n        `id`, stored on the Blender node: repeating the same call updates those\n        nodes and reuses links instead of creating `.001` duplicates.\n\n        Args:\n            material: Existing material name.\n            nodes: Node specifications. Each requires `id` and Blender `type`.\n                Optional fields are `name`, `label`, `[x,y]` `location`, `mute`,\n                `props`, `image`, `parent`, and `color_ramp`. `props` uses the same\n                property-or-input rules as `set_node_prop`. `image` is an image\n                datablock name for Image Texture nodes. `parent` is a Frame node id.\n                A `color_ramp` has `elements: [{position, color}, ...]` plus optional\n                `interpolation`, `color_mode`, and `hue_interpolation`.\n            links: Link specs with `from`, `from_socket`, `to`, and `to_socket`.\n                Endpoints prefer stable ids but may name unmanaged existing nodes.\n                Sockets accept names or integer indices. A destination's old link\n                is replaced by default; set that link's `replace=false` to refuse.\n            clear_existing: Explicitly delete every existing node first. Default\n                false adopts/updates matching ids or names and preserves user work.\n            remove_unlisted: Delete previously agent-managed nodes whose ids are\n                absent from this call. Unmanaged/user nodes are never removed.\n            active: Stable id or node name to make active (important for baking).\n\n        Example node: `{\"id\":\"noise\",\"type\":\"ShaderNodeTexNoise\",\n        \"location\":[-600,100],\"props\":{\"Scale\":5,\"Detail\":3}}`.\n        Example link: `{\"from\":\"noise\",\"from_socket\":\"Fac\",\"to\":\"ramp\",\n        \"to_socket\":\"Fac\"}`.\n\n        Existing default nodes can be adopted by giving `name=\"Principled BSDF\"`\n        or `name=\"Material Output\"`. A type conflict fails before edits. The whole\n        bridge call is one Blender undo step, and the result maps stable ids to the\n        actual Blender names plus created/reused/replaced counts.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "material",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "nodes",
+     "type": "array",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "links",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "clear_existing",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "remove_unlisted",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "active",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
    "name": "create_material",
    "module": "shading",
    "summary": "Create a Principled BSDF material from plain PBR values.",
@@ -7260,10 +7318,96 @@
    ]
   },
   {
+   "name": "create_texture_image",
+   "module": "shading",
+   "summary": "Create an internal texture, mask, bake target, grid, or small pixel image.",
+   "description": "Create an internal texture, mask, bake target, grid, or small pixel image.\n\n        Args:\n            name: Stable image datablock name. A matching image is safely reused on\n                retry; a size/precision mismatch fails instead of breaking users.\n            width: Pixel width, 1-16384. Total pixels are capped at 67,108,864.\n            height: Pixel height, 1-16384.\n            color: Background RGBA 0-1 (RGB is padded with alpha 1).\n            generated_type: `BLANK`, `UV_GRID`, or `COLOR_GRID`.\n            colorspace: Usually `sRGB` for visible colour or `Non-Color` for masks,\n                roughness, metallic, normals and other numeric data. Defaults from\n                `is_data`.\n            alpha: Allocate alpha storage.\n            float_buffer: Use a 32-bit float/HDR buffer. Costs much more memory.\n            is_data: Mark numeric data rather than display colour.\n            pixels: Optional flat RGBA values in bottom-to-top row order, exactly\n                `width*height*4` numbers. Best for small masks, pixel art, sprite\n                sheets and generated lookup textures; use files for large images.\n            reuse_existing: Retry-safe default. False refuses if `name` exists.\n\n        Generated images are already stored inside the blend. Save one externally\n        with `save_image`, then reference its datablock from `build_node_graph` via\n        a node's `image` field.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "width",
+     "type": "integer",
+     "required": false,
+     "default": 1024,
+     "description": ""
+    },
+    {
+     "name": "height",
+     "type": "integer",
+     "required": false,
+     "default": 1024,
+     "description": ""
+    },
+    {
+     "name": "color",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "generated_type",
+     "type": "string",
+     "required": false,
+     "default": "BLANK",
+     "description": ""
+    },
+    {
+     "name": "colorspace",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "alpha",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    },
+    {
+     "name": "float_buffer",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "is_data",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "description": ""
+    },
+    {
+     "name": "pixels",
+     "type": "array",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "reuse_existing",
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "description": ""
+    }
+   ]
+  },
+  {
    "name": "get_node_graph",
    "module": "shading",
    "summary": "Read a material's whole shader node tree: nodes, sockets and links.",
-   "description": "Read a material's whole shader node tree: nodes, sockets and links.\n\n        Call this before editing nodes. Node *names* (`Principled BSDF`,\n        `Image Texture.001`) are what every other node tool addresses, and they\n        are not predictable \u2014 Blender auto-numbers duplicates.\n\n        Args:\n            material: Material name.\n            limit: Cap on nodes and on links independently. `node_count` /\n                `link_count` are exact; `truncated` says whether either list was cut.\n\n        Each node reports `bl_idname` (what `add_node` takes), `type` (the RNA\n        enum), `location` in node-editor units, and every input socket with its\n        `index`, `type`, `is_linked` and `default_value`. A linked socket's\n        `default_value` is ignored at render time \u2014 the link wins.",
+   "description": "Read a material's whole shader node tree: nodes, sockets and links.\n\n        Call this before editing nodes. Node *names* (`Principled BSDF`,\n        `Image Texture.001`) are what every other node tool addresses, and they\n        are not predictable \u2014 Blender auto-numbers duplicates.\n\n        Args:\n            material: Material name.\n            limit: Cap on nodes and on links independently. `node_count` /\n                `link_count` are exact; `truncated` says whether either list was cut.\n\n        Each node reports `agent_id` (stable caller-owned identity, when set),\n        `bl_idname` (what `add_node` takes), `type` (the RNA enum), `location` in\n        node-editor units, and every input socket with its `index`, `type`,\n        `is_linked` and `default_value`. A linked socket's `default_value` is\n        ignored at render time \u2014 the link wins.",
    "needs_gui": false,
    "params": [
     {
@@ -7322,6 +7466,22 @@
      "type": "string|integer",
      "required": true,
      "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "list_images",
+   "module": "shading",
+   "summary": "List image datablocks with size, source, path, colorspace and packed state.",
+   "description": "List image datablocks with size, source, path, colorspace and packed state.\n\n        Use this before assigning a node's `image` property. `source=\"GENERATED\"`\n        means the image lives inside Blender; `source=\"FILE\"` means `filepath`\n        identifies an external texture. `is_dirty` warns about unsaved pixel edits.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "default": 1000,
      "description": ""
     }
    ]
@@ -7412,6 +7572,43 @@
      "type": "string",
      "required": true,
      "default": null,
+     "description": ""
+    }
+   ]
+  },
+  {
+   "name": "save_image",
+   "module": "shading",
+   "summary": "Save an image datablock to disk as a reusable texture file.",
+   "description": "Save an image datablock to disk as a reusable texture file.\n\n        Args:\n            image: Image name from `list_images`.\n            path: Absolute or Blender `//relative` destination. Parent directories\n                are created. Include the intended extension.\n            file_format: Optional Blender format such as `PNG`, `JPEG`, `OPEN_EXR`,\n                `TIFF`, `TARGA`, `HDR` or `WEBP`. Omit to use the image/current\n                extension-derived format.\n            pack: Also embed the saved external file into the blend. Generated\n                images are already internal and do not need this.\n\n        Returns the resolved path and byte count, so an agent can verify the file\n        was actually written instead of assuming Blender saved it.",
+   "needs_gui": false,
+   "params": [
+    {
+     "name": "image",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "required": true,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "file_format",
+     "type": "string",
+     "required": false,
+     "default": null,
+     "description": ""
+    },
+    {
+     "name": "pack",
+     "type": "boolean",
+     "required": false,
+     "default": false,
      "description": ""
     }
    ]
@@ -10176,11 +10373,25 @@
    "doc": "Bake AO/NORMAL/DIFFUSE/COMBINED to an image with Cycles."
   },
   {
+   "command": "shading.build_node_graph",
+   "module": "shading",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Create or update a complete shader graph using caller-stable node ids."
+  },
+  {
    "command": "shading.create_material",
    "module": "shading",
    "mutates": true,
    "needs_gui": false,
    "doc": "Create a Principled BSDF material from PBR values."
+  },
+  {
+   "command": "shading.create_texture_image",
+   "module": "shading",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Create or safely reuse an internal image for textures, masks or baking."
   },
   {
    "command": "shading.get_node_graph",
@@ -10195,6 +10406,13 @@
    "mutates": true,
    "needs_gui": false,
    "doc": "Connect one node's output socket to another node's input socket."
+  },
+  {
+   "command": "shading.list_images",
+   "module": "shading",
+   "mutates": false,
+   "needs_gui": false,
+   "doc": "List texture/image datablocks with file and colour-management state."
   },
   {
    "command": "shading.load_image_texture",
@@ -10216,6 +10434,13 @@
    "mutates": true,
    "needs_gui": false,
    "doc": "Delete a node from a material's shader tree."
+  },
+  {
+   "command": "shading.save_image",
+   "module": "shading",
+   "mutates": true,
+   "needs_gui": false,
+   "doc": "Save an image datablock to an external texture file."
   },
   {
    "command": "shading.set_node_prop",

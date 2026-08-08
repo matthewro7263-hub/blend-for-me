@@ -3817,7 +3817,7 @@ symmetrize_bones(armature="Rig", direction="POSITIVE_X")
 
 ## shading
 
-11 tools. Materials, shader node graphs, viewport shading and Cycles texture baking.
+15 tools. Materials, retry-safe procedural node graphs, image authoring, viewport shading and Cycles texture baking.
 
 ### add_node
 
@@ -3830,6 +3830,7 @@ Add one shader node to a material, optionally configured in the same call.
 | `props` | object | node attribute or input-socket name -> value | none | no |
 | `location` | array | `[x, y]` node-editor units, +x right, +y up (cosmetic) | none | no |
 | `label` | string | text shown on the node header | none | no |
+| `agent_id` | string | optional caller-stable identity used instead of Blender's auto-numbered name | none | no |
 
 Returns: `{material, node, applied}` — `node` is the assigned name, which may differ from the default.
 
@@ -3838,6 +3839,7 @@ Gotchas:
 - `type` is the `bl_idname` (`ShaderNodeTexNoise`), not the UI label and not the short `type` enum. A near miss raises with close matches from the live build.
 - The node is created DISCONNECTED — wire it with `link_nodes`.
 - Omitting `location` drops it at the origin, usually on top of another node.
+- Prefer `build_node_graph` for more than one node. It batches settings and links and is safe to retry.
 
 ```python
 add_node(material="Skin", type="ShaderNodeTexNoise", props={"Scale": 12.0, "Detail": 4.0}, location=[-600, 200], label="pores")
@@ -3898,6 +3900,40 @@ Gotchas:
 bake(object="Body", type="AO", size=1024, margin=16, samples=64, filepath="/tmp/body_ao.png", return_image=False, timeout=300.0)
 ```
 
+### build_node_graph
+
+Build or update a complete procedural shader in one retry-safe call.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `material` | string | existing material name | — | yes |
+| `nodes` | array | specs with stable `id`, Blender `type`, and optional `props`, `image`, `color_ramp`, `parent`, `location` | — | yes |
+| `links` | array | `{from, from_socket, to, to_socket}` specs; endpoints use ids or names | none | no |
+| `clear_existing` | boolean | delete every existing node before building | `false` | no |
+| `remove_unlisted` | boolean | delete managed nodes whose ids are absent; user nodes survive | `false` | no |
+| `active` | string | node id/name to make active | none | no |
+
+Returns: `{material, nodes, created, updated, removed, applied, color_ramps, links, links_created, links_reused, links_replaced, node_count, link_count, active_node}`. `nodes` maps stable ids to real Blender names.
+
+Gotchas:
+
+- Every spec needs a unique stable `id`. Repeating the call updates that node and reuses identical links rather than creating `.001` duplicates.
+- `type` is a Blender bl_idname such as `ShaderNodeTexNoise`; frames use `NodeFrame`.
+- `props` first addresses writable node properties, then input socket names. Link sockets accept names or integer indices.
+- A `color_ramp` needs at least two `{position, color}` stops and belongs on `ShaderNodeValToRGB`.
+- `clear_existing=true` is intentionally explicit. The default adopts matching ids/names and preserves unlisted user work. The call is one undo step.
+
+```python
+build_node_graph(
+    material="NeonWall",
+    nodes=[
+        {"id": "noise", "type": "ShaderNodeTexNoise", "props": {"Scale": 8.0}},
+        {"id": "surface", "type": "ShaderNodeBsdfPrincipled", "name": "Principled BSDF"},
+    ],
+    links=[{"from": "noise", "from_socket": "Fac", "to": "surface", "to_socket": "Roughness"}],
+)
+```
+
 ### create_material
 
 Create a Principled BSDF material from plain PBR values.
@@ -3928,6 +3964,36 @@ Gotchas:
 create_material(name="Skin", base_color=[0.8, 0.55, 0.45, 1.0], metallic=0.0, roughness=0.55, ior=1.45)
 ```
 
+### create_texture_image
+
+Create an internal texture, grid, mask, bake target or small custom pixel image.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `name` | string | stable image datablock name | — | yes |
+| `width` | integer | pixels, 1-16384 | `1024` | no |
+| `height` | integer | pixels, 1-16384 | `1024` | no |
+| `color` | array | generated background `[R,G,B,A]`, 0-1 | none | no |
+| `generated_type` | string | `BLANK`, `UV_GRID`, or `COLOR_GRID` | `BLANK` | no |
+| `colorspace` | string | `sRGB` for colour; `Non-Color` for numeric data | none | no |
+| `alpha` | boolean | allocate alpha storage | `true` | no |
+| `float_buffer` | boolean | 32-bit float/HDR buffer | `false` | no |
+| `is_data` | boolean | numeric data rather than display colour | `false` | no |
+| `pixels` | array | optional flat RGBA list, exactly `width*height*4` values | none | no |
+| `reuse_existing` | boolean | safely reuse a matching image on retry | `true` | no |
+
+Returns image size/source/colorspace plus `{created, reused, generated_type, generated_color, pixels_written}`.
+
+Gotchas:
+
+- Generated images already live inside the blend and do not need packing. Use `save_image` for an external texture file.
+- Existing images are reused only when size and precision match; the tool refuses to silently replace an image used by materials.
+- Full pixel arrays are best for small masks, pixel art, sprite sheets and lookup textures. Use a file for large images.
+
+```python
+create_texture_image(name="CharacterMask", width=256, height=256, color=[0, 0, 0, 1], is_data=True)
+```
+
 ### get_node_graph
 
 Read a material's whole shader node tree: nodes, sockets and links.
@@ -3937,11 +4003,11 @@ Read a material's whole shader node tree: nodes, sockets and links.
 | `material` | string | material name | — | yes |
 | `limit` | integer | cap on the returned list (counts stay exact) | `1000` | no |
 
-Returns: `{material, node_count, link_count, nodes, links, active_node, truncated}`; each node reports `bl_idname`, `type`, `location` and every input socket with `index`, `type`, `is_linked`, `default_value`.
+Returns: `{material, node_count, link_count, nodes, links, active_node, truncated}`; each node reports stable `agent_id`, `bl_idname`, `type`, `location` and every input socket with `index`, `type`, `is_linked`, `default_value`.
 
 Gotchas:
 
-- Node NAMES are what every other node tool addresses, and Blender auto-numbers duplicates (`Image Texture.001`). Read them here rather than assuming.
+- Node commands accept either names or `agent_id`. Blender auto-numbers display names (`Image Texture.001`), so stable ids from `build_node_graph` are safer.
 - A linked socket's `default_value` is ignored at render time — the link wins.
 
 ```python
@@ -3970,6 +4036,20 @@ Gotchas:
 
 ```python
 link_nodes(material="Skin", from_node="Noise Texture", from_socket="Fac", to_node="Principled BSDF", to_socket="Roughness")
+```
+
+### list_images
+
+List image datablocks and their texture-relevant state.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `limit` | integer | maximum entries returned | `1000` | no |
+
+Returns: `{count, images, truncated}`; entries include name, size, source, filepath, colorspace, alpha mode, precision, dirty/packed state and users.
+
+```python
+list_images(limit=100)
 ```
 
 ### load_image_texture
@@ -4034,6 +4114,23 @@ Gotchas:
 
 ```python
 remove_node(material="Skin", node="Noise Texture")
+```
+
+### save_image
+
+Save an image datablock to an external texture file.
+
+| param | type | units / meaning | default | required |
+| --- | --- | --- | --- | --- |
+| `image` | string | image datablock name from `list_images` | — | yes |
+| `path` | string | absolute or Blender `//relative` destination | — | yes |
+| `file_format` | string | `PNG`, `JPEG`, `OPEN_EXR`, `TIFF`, `TARGA`, `HDR`, `WEBP`, etc. | none | no |
+| `pack` | boolean | also embed the saved external file in the blend | `false` | no |
+
+Returns image state plus `{saved_path, bytes, file_format}` and verifies the file exists.
+
+```python
+save_image(image="CharacterMask", path="//textures/character_mask.png", file_format="PNG")
 ```
 
 ### set_node_prop

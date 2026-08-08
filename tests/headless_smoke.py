@@ -257,6 +257,70 @@ def main() -> None:
     run("shading.assign_material", {"object": "Body", "material": "SmokeMat"})
     run("shading.get_node_graph", {"material": "SmokeMat"},
         check=lambda r: len(r["nodes"]) >= 2)
+    texture_pixels = [
+        1.0, 0.0, 0.0, 1.0,
+        0.0, 1.0, 0.0, 1.0,
+        0.0, 0.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0,
+    ]
+    run("shading.create_texture_image", {
+        "name": "SmokePixels", "width": 2, "height": 2,
+        "pixels": texture_pixels,
+    }, check=lambda r: r["created"] is True and r["pixels_written"] == 4)
+    run("shading.list_images", {},
+        check=lambda r: any(i["name"] == "SmokePixels" for i in r["images"]))
+    texture_path = os.path.join(TMP, "smoke-pixels.png")
+    run("shading.save_image", {
+        "image": "SmokePixels", "path": texture_path, "file_format": "PNG",
+    }, check=lambda r: os.path.isfile(texture_path) and r["bytes"] > 0)
+
+    graph = {
+        "material": "SmokeMat",
+        "clear_existing": True,
+        "active": "surface",
+        "nodes": [
+            {"id": "layout", "type": "NodeFrame", "label": "Agent Texture"},
+            {"id": "noise", "type": "ShaderNodeTexNoise", "parent": "layout",
+             "location": [-600, 100], "props": {"Scale": 4.0, "Detail": 2.0}},
+            {"id": "ramp", "type": "ShaderNodeValToRGB", "parent": "layout",
+             "location": [-350, 100], "color_ramp": {
+                 "interpolation": "EASE",
+                 "elements": [
+                     {"position": 0.2, "color": [0.02, 0.05, 0.2, 1.0]},
+                     {"position": 0.55, "color": [0.8, 0.1, 0.03, 1.0]},
+                     {"position": 0.8, "color": [1.0, 0.7, 0.1, 1.0]},
+                 ],
+             }},
+            {"id": "pixels", "type": "ShaderNodeTexImage", "parent": "layout",
+             "location": [-600, -200], "image": "SmokePixels"},
+            {"id": "surface", "type": "ShaderNodeBsdfPrincipled",
+             "location": [0, 100], "props": {"Roughness": 0.35}},
+            {"id": "output", "type": "ShaderNodeOutputMaterial",
+             "location": [300, 100]},
+        ],
+        "links": [
+            {"from": "noise", "from_socket": "Fac", "to": "ramp", "to_socket": "Fac"},
+            {"from": "ramp", "from_socket": "Color", "to": "surface",
+             "to_socket": "Base Color"},
+            {"from": "surface", "from_socket": "BSDF", "to": "output",
+             "to_socket": "Surface"},
+        ],
+    }
+    run("shading.build_node_graph", graph,
+        check=lambda r: len(r["created"]) == 6 and r["links_created"] == 3
+        and r["active_node"] == r["nodes"]["surface"])
+    retry_graph = dict(graph)
+    retry_graph["clear_existing"] = False
+    run("shading.build_node_graph", retry_graph,
+        check=lambda r: not r["created"] and len(r["updated"]) == 6
+        and r["links_reused"] == 3 and r["link_count"] == 3)
+    run_bridge("shading.build_node_graph", retry_graph,
+        check=lambda r: r.get("ok") is True
+        and r["result"]["links_reused"] == 3)
+    run("shading.get_node_graph", {"material": "SmokeMat"},
+        check=lambda r: {n["agent_id"] for n in r["nodes"]} >= {
+            "layout", "noise", "ramp", "pixels", "surface", "output"
+        })
 
     section("anim")
     run("anim.set_frame_range", {"start": 1, "end": 24},
