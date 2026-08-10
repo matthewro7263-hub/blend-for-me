@@ -30,6 +30,9 @@ help:
 build-ext:
 	python3 scripts/build_extension.py
 
+dist-full: build-ext
+	python3 scripts/package_full_release.py
+
 install-ext: build-ext
 	python3 scripts/install_extension.py --blender "$(BLENDER)"
 
