@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Union
 
-from ..server import call, clean, png_image
+from ..server import call, clean, image_with_metadata, png_image
 
 VertsSpec = Union[str, list[int], dict]
 
@@ -869,4 +869,4 @@ def register(mcp) -> None:
                        clean(mesh=mesh, group=group, max_size=max_size,
                              show_contours=show_contours, use_render=use_render),
                        timeout=90.0)
-        return png_image(payload)
+        return image_with_metadata(payload)

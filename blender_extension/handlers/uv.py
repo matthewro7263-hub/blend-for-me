@@ -12,6 +12,7 @@ import math
 
 import bpy
 
+from .. import ctx
 from ..registry import command
 
 
@@ -33,21 +34,15 @@ def _mesh_object(name: str | None):
 
 @contextlib.contextmanager
 def _edit_mode(obj, select_mode: str = "FACE", select_all: bool = True):
-    previous = bpy.context.mode
-    if previous != "OBJECT":
-        bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.mode_set(mode="EDIT")
-    try:
+    with ctx.preserve_context(active_object=obj, restore_elements=not select_all):
+        if bpy.context.mode != "EDIT_MESH":
+            bpy.ops.object.mode_set(mode="EDIT")
         bpy.context.tool_settings.mesh_select_mode = (
-            select_mode == "VERT", select_mode == "EDGE", select_mode == "FACE")
+            select_mode == "VERT", select_mode == "EDGE", select_mode == "FACE"
+        )
         if select_all:
             bpy.ops.mesh.select_all(action="SELECT")
         yield
-    finally:
-        bpy.ops.object.mode_set(mode="OBJECT")
-        if previous not in ("OBJECT", "EDIT_MESH"):
-            with contextlib.suppress(Exception):
-                bpy.ops.object.mode_set(mode=previous)
 
 
 def _supported(op) -> set:

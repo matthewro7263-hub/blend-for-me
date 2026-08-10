@@ -346,6 +346,8 @@ def assign_weights(params: dict) -> dict:
 @command("weights.set_weights", mutates=True)
 def set_weights(params: dict) -> dict:
     """Bulk-write an explicit ``{vertex_index: weight}`` map into one group."""
+    import math
+
     obj = _mesh_object(params["mesh"])
     group = _group(obj, params["group"])
     raw = params["weights"]
@@ -354,13 +356,31 @@ def set_weights(params: dict) -> dict:
 
     count = len(obj.data.vertices)
     remove_zero = bool(params.get("remove_zero", False))
-    written = 0
-    removed = 0
+
+    # Pre-parse and validate all entries before touching live vertex group
+    entries_to_apply = []
     for key, value in raw.items():
-        index = int(key)
+        try:
+            index = int(key)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"vertex index must be an integer, got {key!r}") from exc
+
         if index < 0 or index >= count:
             raise IndexError(f"vertex index {index} out of range for {obj.name!r} (0..{count - 1})")
-        weight = float(value)
+
+        try:
+            weight = float(value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"weight must be a float, got {value!r}") from exc
+
+        if not math.isfinite(weight):
+            raise ValueError(f"weight must be finite, got {weight!r}")
+
+        entries_to_apply.append((index, weight))
+
+    written = 0
+    removed = 0
+    for index, weight in entries_to_apply:
         if remove_zero and weight <= 0.0:
             group.remove([index])
             removed += 1

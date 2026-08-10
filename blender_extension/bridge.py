@@ -27,9 +27,6 @@ from typing import Optional
 from . import protocol, registry
 
 # --------------------------------------------------------------------------
-# module state
-# --------------------------------------------------------------------------
-
 _server: Optional["_BridgeServer"] = None
 _INBOX: "queue.Queue[_Job]" = queue.Queue()
 
@@ -39,6 +36,10 @@ _log_lock = threading.Lock()
 
 #: Set by the pump so the UI can show liveness without touching the socket.
 STATS = {"commands": 0, "errors": 0, "last_cmd": "", "last_ms": 0.0}
+
+#: Request deduplication table: (client_id, msg_id) -> response_dict
+_DEDUPLICATION_CACHE: dict[tuple[str, str], dict] = {}
+_dedup_lock = threading.Lock()
 
 
 def log(msg: str) -> None:
@@ -52,15 +53,32 @@ def recent_log(n: int = 20) -> list[str]:
         return list(LOG)[-n:]
 
 
+def _cache_response(client_id: str, msg_id: str, response: dict) -> None:
+    if not msg_id:
+        return
+    with _dedup_lock:
+        if len(_DEDUPLICATION_CACHE) > 1000:
+            _DEDUPLICATION_CACHE.clear()
+        _DEDUPLICATION_CACHE[(client_id, msg_id)] = response
+
+
+def _get_cached_response(client_id: str, msg_id: str) -> Optional[dict]:
+    if not msg_id:
+        return None
+    with _dedup_lock:
+        return _DEDUPLICATION_CACHE.get((client_id, msg_id))
+
+
 class _Job:
     """One in-flight request handed from a reader thread to the main thread."""
 
-    __slots__ = ("msg_id", "cmd", "params", "reply", "queued_at")
+    __slots__ = ("msg_id", "cmd", "params", "reply", "queued_at", "client_id")
 
-    def __init__(self, msg_id: str, cmd: str, params: dict):
+    def __init__(self, msg_id: str, cmd: str, params: dict, client_id: str = "default"):
         self.msg_id = msg_id
         self.cmd = cmd
         self.params = params
+        self.client_id = client_id
         self.reply: "queue.Queue[dict]" = queue.Queue(maxsize=1)
         self.queued_at = time.monotonic()
 
@@ -69,8 +87,8 @@ class _Job:
 # main-thread execution
 # --------------------------------------------------------------------------
 
-def _execute(job: _Job) -> dict:
-    """Run one command. **Main thread only.**"""
+def _execute_handler(job: _Job) -> dict:
+    """Run one command after activity instrumentation. **Main thread only.**"""
     import bpy  # noqa: F401  (imported here so the module stays importable w/o Blender)
 
     handler = registry.HANDLERS.get(job.cmd)
@@ -89,8 +107,8 @@ def _execute(job: _Job) -> dict:
     # wrong one and report success. Fail loudly instead.
     accepted = meta.get("params")
     if accepted:
-        allowed = set(accepted) | {"_timeout"}
-        unknown = sorted(k for k in job.params if k not in allowed)
+        allowed = set(accepted)
+        unknown = sorted(k for k in job.params if not k.startswith("_") and k not in allowed)
         if unknown:
             return protocol.err(
                 job.msg_id,
@@ -113,6 +131,35 @@ def _execute(job: _Job) -> dict:
         # The agent must always learn *why* something failed, so the full
         # traceback travels back over the wire.
         return protocol.err(job.msg_id, f"{type(exc).__name__}: {exc}", traceback.format_exc())
+
+
+def _execute(job: _Job) -> dict:
+    """Run one command and mirror its lifecycle into the optional Blender UI."""
+    started = time.monotonic()
+    activity_ui = None
+    try:
+        from . import activity_ui as activity_module
+
+        activity_ui = activity_module
+        activity_ui.begin_job(job.cmd, job.params, job.msg_id)
+    except Exception as exc:  # UI must never prevent a Blender command.
+        log(f"activity UI begin failed: {type(exc).__name__}: {exc}")
+
+    try:
+        response = _execute_handler(job)
+    except Exception as exc:  # defensive: _execute_handler normally packages errors
+        response = protocol.err(
+            job.msg_id,
+            f"{type(exc).__name__}: {exc}",
+            traceback.format_exc(),
+        )
+
+    if activity_ui is not None:
+        try:
+            activity_ui.finish_job(response, (time.monotonic() - started) * 1000.0)
+        except Exception as exc:
+            log(f"activity UI finish failed: {type(exc).__name__}: {exc}")
+    return response
 
 
 def _pump() -> float:
@@ -288,48 +335,79 @@ class _BridgeServer:
 
     def _handle_line(self, conn: socket.socket, line: bytes) -> None:
         try:
-            msg = json.loads(line.decode("utf-8"))
+            raw_msg = json.loads(line.decode("utf-8"))
         except Exception as exc:
-            self._send(conn, protocol.err("", f"malformed JSON: {exc}"))
+            self._send(conn, protocol.err("", f"malformed JSON: {exc}", code=protocol.ErrorCode.VALIDATION_ERROR))
             return
 
-        msg_id = str(msg.get("id", ""))
-        cmd = msg.get("cmd")
-        params = msg.get("params") or {}
-        if not isinstance(params, dict):
-            self._send(conn, protocol.err(msg_id, "params must be an object"))
-            return
-        if not cmd:
-            self._send(conn, protocol.err(msg_id, "missing 'cmd'"))
+        try:
+            validated = protocol.validate_request_frame(raw_msg)
+        except protocol.ProtocolError as exc:
+            self._send(conn, protocol.err(raw_msg.get("id", "") if isinstance(raw_msg, dict) else "", str(exc), code=exc.code))
             return
 
-        # `shutdown` is answered on the socket thread: it must not depend on the
-        # main-thread pump still being alive.
+        msg_id = validated["id"]
+        cmd = validated["cmd"]
+        params = validated["params"]
+        client_id = str(params.get("_client_id", "default"))
+
+        # Deduplication check
+        cached = _get_cached_response(client_id, msg_id)
+        if cached is not None:
+            self._send(conn, cached)
+            return
+
+        # Built-in socket thread commands
+        if cmd == "handshake":
+            req_version = int(params.get("protocol_version", protocol.PROTOCOL_VERSION))
+            if req_version != protocol.PROTOCOL_VERSION:
+                res = protocol.err(
+                    msg_id,
+                    f"protocol mismatch: server supports version {protocol.PROTOCOL_VERSION}, client sent {req_version}",
+                    code=protocol.ErrorCode.PROTOCOL_MISMATCH,
+                )
+                self._send(conn, res)
+                return
+
+            import bpy
+            bl_ver = getattr(bpy.app, "version_string", "5.2.0")
+            res = protocol.ok(
+                msg_id,
+                {
+                    "protocol_version": protocol.PROTOCOL_VERSION,
+                    "extension_id": "blender_agent_mcp",
+                    "extension_version": "0.0.1-beta",
+                    "blender_version": bl_ver,
+                    "session_id": getattr(self, "session_id", "default_session"),
+                    "paired": True,
+                    "max_line_bytes": protocol.MAX_LINE_BYTES,
+                },
+            )
+            _cache_response(client_id, msg_id, res)
+            self._send(conn, res)
+            return
+
         if cmd == "shutdown":
-            self._send(conn, protocol.ok(msg_id, {"stopping": True}))
+            res = protocol.ok(msg_id, {"stopping": True})
+            _cache_response(client_id, msg_id, res)
+            self._send(conn, res)
             threading.Thread(target=stop_server, daemon=True).start()
             return
 
         timeout = float(params.get("_timeout") or protocol.DEFAULT_TIMEOUT)
-        # The client enforces its own deadline; give the main thread a little
-        # extra so a slow-but-succeeding command still reports its real result.
         wait = max(1.0, timeout + 5.0)
 
-        job = _Job(msg_id, cmd, params)
+        job = _Job(msg_id, cmd, params, client_id=client_id)
         _INBOX.put(job)
         try:
             response = job.reply.get(timeout=wait)
         except queue.Empty:
             response = protocol.err(
                 msg_id,
-                f"timed out after {wait:.0f}s waiting for Blender's main thread. "
-                f"That budget comes from the request's '_timeout' parameter "
-                f"({timeout:.0f}s, default {protocol.DEFAULT_TIMEOUT:.0f}s) plus a "
-                f"5s grace period — for a genuinely slow operation, raise it "
-                f"rather than retrying. If the command should have been fast, "
-                f"Blender is busy: a modal operator, a render, or a blocking "
-                f"dialog is holding the main thread.",
+                f"timed out after {wait:.0f}s waiting for Blender's main thread.",
+                code=protocol.ErrorCode.TIMEOUT,
             )
+        _cache_response(client_id, msg_id, response)
         self._send(conn, response)
 
     @staticmethod
@@ -369,3 +447,14 @@ def stop_server() -> None:
     srv, _server = _server, None
     srv.stop()
     stop_pump()
+
+    # Drain any remaining in-flight inbox jobs and release waiting threads
+    while True:
+        try:
+            job = _INBOX.get_nowait()
+            try:
+                job.reply.put_nowait(protocol.err(job.msg_id, "server stopped", code=protocol.ErrorCode.CANCELLED))
+            except Exception:
+                pass
+        except queue.Empty:
+            break

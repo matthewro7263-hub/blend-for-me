@@ -157,6 +157,10 @@ A timeout is not a crash. Verify state before retrying anything.
 - **Prefer the dedicated tool over `execute_python`.** Dedicated tools push undo,
   validate arguments and return structured results. When you do fall back to
   `execute_python`, say so and explain why no tool covered it.
+- **Make custom work visible when useful.** Inside `execute_python`, use
+  `run_terminal(...)` for shell work whose live output should appear in Blender,
+  and call `agent_activity.step(label, [x, y])` while building custom node graphs.
+  Commands launched outside the Blender bridge cannot appear in its overlay.
 - **Data API over UI simulation for weights.** Write vertex groups with
   `set_weights` / `assign_weights`. Reserve brush strokes for geometry that must
   actually be sculpted.

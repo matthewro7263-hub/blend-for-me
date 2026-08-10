@@ -17,8 +17,8 @@ INSTRUCTIONS = """\
 Drive Blender directly: model, sculpt, rig, weight-paint, shade, animate and export.
 
 Connection: tools relay to a loopback bridge inside a running Blender. If a tool
-reports it cannot reach Blender, tell the user to enable the 'Agent MCP Bridge'
-add-on and press Start Server in the 3D Viewport's N-panel ▸ Agent MCP tab.
+reports it cannot reach Blender, tell the user to enable the 'Blender for me'
+add-on and press Start Server in the 3D Viewport's N-panel ▸ Blender for me tab.
 
 Working effectively:
 * Call `get_scene_info` before acting so you address objects by their real names.
@@ -33,8 +33,8 @@ Working effectively:
 """
 
 mcp = MCPServer(
-    name="blender-agent-mcp",
-    version="0.1.0",
+    name="Blender for me",
+    version="0.0.1-beta",
     instructions=INSTRUCTIONS,
 )
 
@@ -51,6 +51,18 @@ def call(cmd: str, params: Optional[dict] = None, timeout: float = 10.0) -> Any:
 def png_image(payload: dict) -> Image:
     """Turn a bridge ``{"png_b64": ...}`` payload into an MCP image content block."""
     return Image(data=base64.b64decode(payload["png_b64"]), format="png")
+
+
+def image_with_metadata(payload: dict) -> list:
+    """Return structured JSON metadata text alongside the MCP Image content block."""
+    import json
+    meta = dict(payload)
+    b64_data = meta.pop("png_b64", None)
+    img_block = Image(data=base64.b64decode(b64_data), format="png") if b64_data else None
+    meta_text = json.dumps(meta, default=str)
+    if img_block:
+        return [meta_text, img_block]
+    return [meta_text]
 
 
 def clean(**kwargs) -> dict:

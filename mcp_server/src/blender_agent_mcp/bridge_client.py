@@ -35,10 +35,11 @@ NOT_CONNECTED_HELP = (
 class BridgeError(RuntimeError):
     """A command reached Blender but failed there. Carries the remote traceback."""
 
-    def __init__(self, message: str, remote_traceback: str = "", command: str = ""):
+    def __init__(self, message: str, remote_traceback: str = "", command: str = "", code: str = "internal_error"):
         super().__init__(message)
         self.remote_traceback = remote_traceback
         self.command = command
+        self.code = code
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -53,15 +54,17 @@ class NotConnected(RuntimeError):
 
 class BridgeClient:
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
+        import uuid
         self.host = host or os.environ.get(HOST_ENV_VAR, DEFAULT_HOST)
         self.port = int(port or os.environ.get(PORT_ENV_VAR, DEFAULT_PORT))
+        self.client_id = f"client_{uuid.uuid4().hex[:8]}"
         self._sock: Optional[socket.socket] = None
         self._buf = bytearray()
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
 
     # -- connection -----------------------------------------------------
-    def connect(self, timeout: float = 5.0) -> None:
+    def connect(self, timeout: float = 5.0, handshake: bool = True) -> None:
         self.close()
         try:
             sock = socket.create_connection((self.host, self.port), timeout=timeout)
@@ -73,6 +76,27 @@ class BridgeClient:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._sock = sock
         self._buf.clear()
+
+        if handshake:
+            handshake_id = str(next(self._ids))
+            hs_frame = (json.dumps({
+                "id": handshake_id,
+                "cmd": "handshake",
+                "params": {"protocol_version": 1, "_client_id": self.client_id}
+            }, separators=(",", ":")) + "\n").encode("utf-8")
+            try:
+                self._sock.sendall(hs_frame)
+                resp = self._read_response(handshake_id, timeout=timeout)
+                if not resp.get("ok") and "unknown command" not in str(resp.get("error", "")):
+                    self.close()
+                    raise NotConnected(f"handshake failed: {resp.get('error')}")
+            except TimeoutError:
+                pass
+            except Exception as exc:
+                if isinstance(exc, NotConnected):
+                    raise
+                # Graceful fallback if mock or legacy server drops handshake
+                pass
 
     def close(self) -> None:
         if self._sock is not None:
@@ -90,49 +114,54 @@ class BridgeClient:
     # -- request/response ----------------------------------------------
     def call(self, cmd: str, params: Optional[dict] = None,
              timeout: float = DEFAULT_TIMEOUT) -> Any:
-        """Send one command and return its ``result``.
-
-        ``timeout`` travels to Blender as a reserved ``_timeout`` parameter so the
-        bridge can bound its own main-thread wait; it is never passed to the
-        handler and never counts as an unknown parameter.
-
-        Raises:
-            NotConnected: the bridge could not be reached (actionable message).
-            BridgeError: the command ran in Blender and failed there.
-            TimeoutError: no response within ``timeout``.
-        """
+        """Send one command and return its ``result``."""
         payload = dict(params or {})
         payload["_timeout"] = timeout
+        payload["_client_id"] = self.client_id
 
         with self._lock:
-            for attempt in (1, 2):  # one transparent reconnect
-                if self._sock is None:
-                    self.connect()
+            if self._sock is None:
+                self.connect()
+
+            msg_id = str(next(self._ids))
+            frame = (json.dumps({"id": msg_id, "cmd": cmd, "params": payload},
+                                separators=(",", ":")) + "\n").encode("utf-8")
+
+            try:
+                self._sock.sendall(frame)
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                self.close()
+                # If sending failed before data went out, try reconnecting once
+                self.connect()
                 msg_id = str(next(self._ids))
                 frame = (json.dumps({"id": msg_id, "cmd": cmd, "params": payload},
                                     separators=(",", ":")) + "\n").encode("utf-8")
                 try:
                     self._sock.sendall(frame)
-                    response = self._read_response(msg_id, timeout)
-                except TimeoutError:
-                    # socket.timeout IS TimeoutError, which subclasses OSError.
-                    # A slow command is not a dead connection: keep the socket and
-                    # let the caller decide whether to retry with a longer budget.
-                    raise
-                except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                except OSError as err_exc:
                     self.close()
-                    if attempt == 2:
-                        raise NotConnected(
-                            NOT_CONNECTED_HELP.format(host=self.host, port=self.port,
-                                                      env=PORT_ENV_VAR, err=exc)
-                        ) from exc
-                    continue  # reconnect and retry once
-                break
+                    raise NotConnected(
+                        NOT_CONNECTED_HELP.format(host=self.host, port=self.port,
+                                                  env=PORT_ENV_VAR, err=err_exc)
+                    ) from err_exc
+
+            # Read response
+            try:
+                response = self._read_response(msg_id, timeout)
+            except TimeoutError:
+                raise
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                self.close()
+                raise BridgeError(
+                    f"Connection lost while waiting for response to {cmd!r}. Outcome is unknown.",
+                    command=cmd, code="outcome_unknown"
+                ) from exc
 
         if response.get("ok"):
             return response.get("result")
         raise BridgeError(response.get("error", "unknown error"),
-                          response.get("traceback", ""), cmd)
+                          response.get("traceback", ""), cmd,
+                          code=response.get("error_code", "internal_error"))
 
     def _read_response(self, expect_id: str, timeout: float) -> dict:
         assert self._sock is not None

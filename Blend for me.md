@@ -20,10 +20,11 @@ Current snapshot, verified locally on August 8, 2026:
 | MCP server | Python 3.11+, official `mcp` SDK 2.x |
 | MCP tools | 231 tools across 16 modules |
 | Blender bridge | 225 commands; 22 GUI-only; 169 undo-aware mutations |
-| Unit and documentation tests | 60 passed |
-| Real Blender headless checks | 107 passed, 6 correctly GUI-gated, 0 failed |
-| Install artifact | `dist/blender_agent_mcp-0.1.0.zip`, validated by Blender |
+| Unit and documentation tests | 64 passed |
+| Real Blender headless checks | 110 passed, 6 correctly GUI-gated, 0 failed |
+| Install artifact | `dist/blender_agent_mcp-0.0.1-beta.zip`, validated by Blender |
 | API compatibility probe | Passes all recorded Blender 5.2 assumptions |
+| Agent presence UI | Cursor, editor routing, live Python terminal, smooth dismissal |
 
 The working package and extension identifiers remain `blender-agent-mcp` and
 `blender_agent_mcp`. Renaming those identifiers is a separate compatibility and
@@ -49,6 +50,7 @@ flowchart LR
     B -->|"JSON lines over 127.0.0.1"| C["Blender extension socket thread"]
     C -->|"thread-safe queue"| D["bpy.app.timers main-thread pump"]
     D --> E["Validated Blender handlers"]
+    D --> U["Agent cursor + live terminal overlay"]
     E --> F["Scene, objects, shaders, rigs, animation, VSE, renders"]
 ```
 
@@ -57,9 +59,22 @@ requests. A timer callback executes every Blender command on Blender's main
 thread and returns structured JSON. Mutating bridge commands push an undo step
 before execution.
 
+In GUI Blender, every bridge request also drives an optional agent-presence
+layer. The supplied upward cursor SVG is parsed and rendered natively over the
+editor associated with the command. It idles with a left tilt and subtle wiggle,
+turns its tip into each movement direction, and uses damped spring motion before
+settling back into its resting pose. Shader graph batches emit a cursor step
+after every node mutation. For `execute_python`, the cursor exits right, drags a
+macOS-style terminal into the center, types the command, waits outside the
+lower-right corner, then clicks the red control after completion. The
+`run_terminal(...)` helper streams local command output into that window.
+Controls and a self-contained preview live in the Agent MCP N-panel. Headless
+Blender skips all overlay work.
+
 The bridge binds to `127.0.0.1` only. It is not reachable from another machine.
-The `execute_python` escape hatch can run arbitrary local Python, so dedicated
-tools should be preferred and the bridge should be stopped when it is not in use.
+The `execute_python` escape hatch can run arbitrary local Python, and its
+`run_terminal` helper can run shell commands, so dedicated tools should be
+preferred and the bridge should be stopped when it is not in use.
 
 ## What agents can do now
 
@@ -137,7 +152,7 @@ Build the extension:
 make build-ext
 ```
 
-Install `dist/blender_agent_mcp-0.1.0.zip` through:
+Install `dist/blender_agent_mcp-0.0.1-beta.zip` through:
 
 > Blender → Edit → Preferences → Get Extensions → menu → Install from Disk
 

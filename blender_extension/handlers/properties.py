@@ -99,6 +99,29 @@ def set_property(params: dict) -> dict:
     key = str(params["key"]).strip()
     if not key or key == "_RNA_UI":
         raise ValueError("key must be non-empty and cannot be the reserved '_RNA_UI'")
+
+    existed = key in owner
+    old_value = None
+    old_ui = None
+    if existed:
+        old_value = owner[key]
+        try:
+            old_ui = owner.id_properties_ui(key).as_dict()
+        except (KeyError, TypeError, AttributeError):
+            old_ui = None
+
+    val = params["value"]
+    val_is_int = isinstance(val, int) and not isinstance(val, bool)
+    num_cast = int if val_is_int else float
+
+    ui_values = {}
+    for name, cast in (("description", str), ("subtype", str),
+                       ("min", num_cast), ("max", num_cast),
+                       ("soft_min", num_cast), ("soft_max", num_cast),
+                       ("step", float), ("precision", int), ("default", None)):
+        if params.get(name) is not None:
+            ui_values[name] = params[name] if cast is None else cast(params[name])
+
     try:
         owner[key] = params["value"]
     except (TypeError, ValueError) as exc:
@@ -107,19 +130,22 @@ def set_property(params: dict) -> dict:
             "a numeric array, or a nested dictionary"
         ) from exc
 
-    ui_values = {}
-    for name, cast in (("description", str), ("subtype", str),
-                       ("min", float), ("max", float),
-                       ("soft_min", float), ("soft_max", float),
-                       ("step", float), ("precision", int), ("default", None)):
-        if params.get(name) is not None:
-            ui_values[name] = params[name] if cast is None else cast(params[name])
     if ui_values:
         try:
             owner.id_properties_ui(key).update(**ui_values)
-        except (TypeError, ValueError) as exc:
-            del owner[key]
+        except Exception as exc:
+            if existed:
+                owner[key] = old_value
+                if old_ui:
+                    try:
+                        owner.id_properties_ui(key).update(**old_ui)
+                    except Exception:
+                        pass
+            else:
+                if key in owner:
+                    del owner[key]
             raise ValueError(f"invalid UI metadata for {key!r}: {exc}") from exc
+
     owner.update_tag()
     result = _entry(owner, key)
     result.update(target_type=kind, target=owner.name)

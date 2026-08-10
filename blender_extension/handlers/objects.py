@@ -657,7 +657,7 @@ def object_bounds(params: dict) -> dict:
         "dimensions": list(obj.dimensions),
         "location": list(obj.location),
         "matrix_world": [list(row) for row in obj.matrix_world],
-        "degenerate": all(abs(v) < 1e-9 for c in local for v in c),
+        "degenerate": max(_extent(local)["size"]) <= 1e-6 if local else True,
     }
 
 
@@ -1014,6 +1014,10 @@ def frame_object(params: dict) -> dict:
     cam.location = center + offset * distance
     cam.rotation_mode = "XYZ"
     cam.rotation_euler = _aim_euler(cam.location, center)
+
+    if cam.data.type == "ORTHO":
+        cam.data.ortho_scale = radius * 2.0 * margin
+
     if params.get("make_active", True):
         bpy.context.scene.camera = cam
     bpy.context.view_layer.update()

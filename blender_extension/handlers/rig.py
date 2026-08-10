@@ -799,10 +799,18 @@ def add_bone_constraint(params: dict) -> dict:
             f"unknown bone constraint type {con_type!r}; valid types are: {valid}"
         )
 
-    constraint = pb.constraints.new(type=con_type)
-    if params.get("name"):
-        constraint.name = params["name"]
-    applied = _apply_settings(constraint, params.get("settings"))
+    created = False
+    try:
+        constraint = pb.constraints.new(type=con_type)
+        created = True
+        if params.get("name"):
+            constraint.name = params["name"]
+        applied = _apply_settings(constraint, params.get("settings"))
+    except Exception:
+        if created and "constraint" in locals() and constraint in pb.constraints.values():
+            pb.constraints.remove(constraint)
+        raise
+
     _refresh()
 
     return {
@@ -1304,9 +1312,19 @@ def add_driver(params: dict) -> dict:
     index = params.get("index")
     index = -1 if index is None else int(index)
 
-    existing = []
-    if owner.animation_data:
-        existing = [f.data_path for f in owner.animation_data.drivers]
+    driver_type = str(params.get("driver_type", "SCRIPTED")).upper()
+    valid_types = _enum_ids(bpy.types.Driver.bl_rna.properties["type"])
+    if driver_type not in valid_types:
+        raise ValueError(f"driver_type must be one of {valid_types}, got {driver_type!r}")
+
+    variables = params.get("variables") or []
+    valid_var = _enum_ids(bpy.types.DriverVariable.bl_rna.properties["type"])
+    for spec in variables:
+        var_type = str(spec.get("type", "SINGLE_PROP")).upper()
+        if var_type not in valid_var:
+            raise ValueError(
+                f"variable type must be one of {valid_var}, got {var_type!r}"
+            )
 
     try:
         curves = owner.driver_add(data_path, index)
@@ -1319,12 +1337,7 @@ def add_driver(params: dict) -> dict:
         ) from exc
     curves = curves if isinstance(curves, list) else [curves]
 
-    variables = params.get("variables") or []
     expression = params.get("expression", "var")
-    driver_type = str(params.get("driver_type", "SCRIPTED")).upper()
-    valid_types = _enum_ids(bpy.types.Driver.bl_rna.properties["type"])
-    if driver_type not in valid_types:
-        raise ValueError(f"driver_type must be one of {valid_types}, got {driver_type!r}")
 
     described = []
     for curve in curves:
@@ -1338,11 +1351,6 @@ def add_driver(params: dict) -> dict:
         for spec in variables:
             var = driver.variables.new()
             var_type = str(spec.get("type", "SINGLE_PROP")).upper()
-            valid_var = _enum_ids(bpy.types.DriverVariable.bl_rna.properties["type"])
-            if var_type not in valid_var:
-                raise ValueError(
-                    f"variable type must be one of {valid_var}, got {var_type!r}"
-                )
             var.type = var_type
             if spec.get("name"):
                 var.name = spec["name"]

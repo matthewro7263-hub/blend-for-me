@@ -112,7 +112,7 @@ Run arbitrary Python inside Blender. The escape hatch — prefer a real tool.
 
 | param | type | units / meaning | default | required |
 | --- | --- | --- | --- | --- |
-| `code` | string | Python source, executed with `bpy` in scope | — | yes |
+| `code` | string | Python source, executed with `bpy`, `agent_activity`, and `run_terminal` in scope | — | yes |
 | `timeout` | number | seconds to wait (default 30) | `30.0` | no |
 
 Returns: `{stdout, stderr, result, error, traceback}`. The call never raises — a failure comes back as `error` + `traceback` so you always get the diagnosis.
@@ -121,10 +121,18 @@ Gotchas:
 
 - The escape hatch, not a shortcut. Dedicated tools push undo, validate arguments and return structured results; this does none of that.
 - Failures come back as `error` + `traceback` rather than raising, so check those fields — a silent `result: null` is not success.
+- In GUI Blender, stdout/stderr appears live in the Agent Terminal. Use `run_terminal("command", cwd=..., timeout=..., check=True)` to stream a zsh command, or pass an argv list to bypass the shell.
+- Custom node-building loops can call `agent_activity.step("label", [node_x, node_y])` to move the visible agent cursor to each node.
+- Shell commands run outside this MCP call are not observable by Blender.
 - Say out loud why no tool covered the case when you fall back to this.
 
 ```python
 execute_python(code="import bpy\nlen(bpy.data.objects)", timeout=15.0)
+
+execute_python(
+    code="run_terminal('python3 -u render_preview.py', cwd='/path/to/show')",
+    timeout=180.0,
+)
 ```
 
 ### get_blender_version

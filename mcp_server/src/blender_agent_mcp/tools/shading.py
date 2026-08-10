@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Union
 
-from ..server import call, clean, png_image
+from ..server import call, clean, image_with_metadata, png_image
 
 SocketRef = Union[str, int]
 
@@ -540,6 +540,6 @@ def register(mcp) -> None:
         ), timeout=timeout)
 
         if return_image and payload.get("png_b64"):
-            return png_image(payload)
+            return image_with_metadata(payload)
         payload.pop("png_b64", None)
         return payload

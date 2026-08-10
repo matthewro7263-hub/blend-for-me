@@ -1,6 +1,6 @@
 [project]
-name = "blender-agent-mcp"
-version = "0.1.0"
+name = "blender-for-me"
+version = "0.0.1-beta"
 description = "MCP server giving AI agents deep control of Blender via a loopback bridge"
 readme = "README.md"
 requires-python = ">=3.11"

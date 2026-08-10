@@ -158,9 +158,14 @@ def set_render(params: dict) -> dict:
         engine = str(params["engine"]).upper()
         if engine == "CYCLES":
             gpu = ctx.enable_cycles_metal()
-        _set_enum(render, "engine", engine)
-        if engine == "CYCLES" and gpu and gpu.get("device_type") == "METAL":
-            scene.cycles.device = "GPU"
+            try:
+                render.engine = "CYCLES"
+            except Exception as exc:
+                raise ValueError(f"could not set render engine to CYCLES: {exc}") from exc
+            if gpu and gpu.get("device_type") == "METAL" and hasattr(scene, "cycles"):
+                scene.cycles.device = "GPU"
+        else:
+            _set_enum(render, "engine", engine)
 
     resolution = params.get("resolution")
     if resolution is not None:

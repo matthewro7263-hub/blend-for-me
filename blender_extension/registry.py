@@ -138,25 +138,81 @@ def _is_params(node) -> bool:
     return isinstance(node, ast.Name) and node.id == "params"
 
 
-def command(name: str, *, mutates: bool = False, needs_gui: bool = False):
-    """Register ``name`` as a bridge command.
+import math
 
-    Args:
-        name: Wire-level command name, e.g. ``"objects.create_primitive"``.
-        mutates: When true the dispatcher pushes an undo step before running the
-            handler, so the agent can always roll a change back.
-        needs_gui: When true the command requires a real ``VIEW_3D`` area and will
-            fail under ``blender --background``. Recorded so ``list_commands`` can
-            tell an agent up front instead of failing at call time.
-    """
+
+def strict_bool(val: object) -> bool:
+    """Coerce boolean strictly, rejecting string 'false' / 'true' trap."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        if val in (0, 1):
+            return bool(val)
+    if isinstance(val, str):
+        low = val.strip().lower()
+        if low in ("true", "1", "yes"):
+            return True
+        if low in ("false", "0", "no"):
+            return False
+    raise ValueError(f"expected strict boolean, got {val!r}")
+
+
+def validate_finite(val: object, param_name: str = "") -> float:
+    """Assert number is finite (not NaN or inf)."""
+    if isinstance(val, (int, float)):
+        fval = float(val)
+        if not math.isfinite(fval):
+            raise ValueError(f"parameter {param_name!r} must be finite, got {val}")
+        return fval
+    if isinstance(val, (list, tuple)):
+        for item in val:
+            validate_finite(item, param_name)
+        return 0.0
+    raise TypeError(f"parameter {param_name!r} must be numeric, got {type(val).__name__}")
+
+
+def command(
+    name: str,
+    *,
+    mutates: bool = False,
+    needs_gui: bool = False,
+    read_only: bool | None = None,
+    scene_state: bool = False,
+    ui_state: bool = False,
+    filesystem_write: bool = False,
+    process_execution: bool = False,
+    preference_write: bool = False,
+    network_access: bool = False,
+    undoable: bool = False,
+    idempotent: bool = False,
+    destructive: bool = False,
+):
+    """Register ``name`` as a bridge command with explicit effect metadata."""
+    if mutates:
+        scene_state = True
+        undoable = True
+        if read_only is None:
+            read_only = False
+    elif read_only is None:
+        read_only = not (scene_state or ui_state or filesystem_write or process_execution or preference_write)
 
     def deco(fn: Callable[[dict], object]) -> Callable[[dict], object]:
         if name in HANDLERS:
             raise RuntimeError(f"duplicate bridge command: {name}")
         HANDLERS[name] = fn
         META[name] = {
-            "mutates": mutates,
-            "needs_gui": needs_gui,
+            "mutates": bool(mutates or scene_state),
+            "needs_gui": bool(needs_gui),
+            "read_only": bool(read_only),
+            "scene_state": bool(scene_state),
+            "ui_state": bool(ui_state),
+            "filesystem_write": bool(filesystem_write),
+            "process_execution": bool(process_execution),
+            "preference_write": bool(preference_write),
+            "network_access": bool(network_access),
+            "undoable": bool(undoable),
+            "idempotent": bool(idempotent),
+            "destructive": bool(destructive),
             "doc": (fn.__doc__ or "").strip().split("\n")[0],
             "params": sorted(accepted_params(fn)),
         }

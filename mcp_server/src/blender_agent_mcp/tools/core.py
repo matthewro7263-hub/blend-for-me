@@ -5,19 +5,14 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from .. import bridge_client
-from ..server import call, clean, png_image
+from ..server import call, clean, image_with_metadata, png_image
 
 
 def register(mcp) -> None:
 
     @mcp.tool()
     def health() -> dict:
-        """Check whether the Blender bridge is reachable, and report what it can do.
-
-        Call this first when anything else fails. Returns connection state plus,
-        when connected, the Blender version, whether Blender is running headless,
-        and whether a 3D Viewport exists (GUI-only tools need one).
-        """
+        """Check whether the Blender bridge is reachable, and report full capabilities."""
         try:
             info = call("get_version", timeout=5.0)
         except bridge_client.NotConnected as exc:
@@ -29,11 +24,17 @@ def register(mcp) -> None:
             "connected": True,
             "host": client.host,
             "port": client.port,
-            "blender": info.get("blender_version_string"),
+            "mcp_server_version": "0.0.1-beta",
+            "extension_version": info.get("extension_version", "0.0.1-beta"),
+            "protocol_version": info.get("protocol_version", 1),
+            "blender_version": info.get("blender_version_string"),
+            "session_id": info.get("session_id"),
+            "paired": info.get("paired", True),
             "background": info.get("background"),
             "has_view3d": info.get("has_view3d"),
             "gui_tools_available": bool(info.get("has_view3d")),
-            "commands_served": info.get("stats", {}).get("commands"),
+            "bridge_command_count": info.get("command_count"),
+            "stats": info.get("stats", {}),
         }
 
     @mcp.tool()
@@ -133,6 +134,12 @@ def register(mcp) -> None:
         stdout, the repr of a trailing expression, and the full traceback on
         failure (the call itself does not raise, so you always get the diagnosis).
 
+        Two extra globals support visible custom work in GUI Blender:
+        `run_terminal(command, cwd=None, timeout=120, check=True)` runs a string
+        through zsh (or an argv list directly) and streams merged output into the
+        Agent Terminal overlay; `agent_activity.step(label, [node_x, node_y])`
+        moves the on-screen agent cursor during custom node-building loops.
+
         Use it for genuinely novel operations. For anything the tool catalog
         covers, the dedicated tool is safer: it pushes undo, validates arguments
         and returns a structured result.
@@ -182,7 +189,7 @@ def register(mcp) -> None:
             clean(shading_mode=shading_mode, camera_view=camera_view, max_size=max_size),
             timeout=60.0,
         )
-        return png_image(payload)
+        return image_with_metadata(payload)
 
     @mcp.tool()
     def render_frame(
@@ -210,4 +217,4 @@ def register(mcp) -> None:
             clean(engine=engine, resolution=resolution, samples=samples),
             timeout=timeout,
         )
-        return png_image(payload)
+        return image_with_metadata(payload)

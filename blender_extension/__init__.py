@@ -11,7 +11,7 @@ import os
 import bpy
 from bpy.app.handlers import persistent
 
-from . import bridge, protocol, registry
+from . import activity_ui, bridge, protocol, registry
 from . import handlers as _handlers  # noqa: F401  (import registers commands)
 
 
@@ -35,11 +35,51 @@ class AgentMCPPreferences(bpy.types.AddonPreferences):
         description="Automatically start the bridge when Blender finishes loading a file",
         default=False,
     )
+    show_activity_overlay: bpy.props.BoolProperty(
+        name="Show agent activity",
+        description="Draw a visible agent cursor in the editor being changed",
+        default=True,
+    )
+    show_agent_cursor: bpy.props.BoolProperty(
+        name="Show cursor",
+        description="Show the supplied Blend for me cursor while commands run",
+        default=True,
+    )
+    show_terminal_overlay: bpy.props.BoolProperty(
+        name="Show Python terminal",
+        description="Show execute_python code and streaming stdout/stderr in Blender",
+        default=True,
+    )
+    activity_overlay_scale: bpy.props.FloatProperty(
+        name="Overlay scale",
+        description="Scale the agent cursor and terminal window",
+        default=1.0,
+        min=0.65,
+        max=1.6,
+        subtype="FACTOR",
+    )
+    terminal_hold_seconds: bpy.props.FloatProperty(
+        name="Terminal pause",
+        description="Seconds the cursor waits after completion before clicking the red close button",
+        default=0.65,
+        min=0.2,
+        max=8.0,
+        subtype="TIME",
+    )
 
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "port")
         layout.prop(self, "autostart")
+        presence = layout.box()
+        presence.label(text="Agent presence", icon="GHOST_ENABLED")
+        presence.prop(self, "show_activity_overlay")
+        column = presence.column(align=True)
+        column.enabled = self.show_activity_overlay
+        column.prop(self, "show_agent_cursor")
+        column.prop(self, "show_terminal_overlay")
+        column.prop(self, "activity_overlay_scale")
+        column.prop(self, "terminal_hold_seconds")
         layout.label(
             text="The bridge binds 127.0.0.1 only and is never reachable off this machine.",
             icon="INFO",
@@ -124,13 +164,29 @@ class AGENTMCP_OT_clear_log(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class AGENTMCP_OT_preview_activity(bpy.types.Operator):
+    bl_idname = "agentmcp.preview_activity"
+    bl_label = "Preview Agent UI"
+    bl_description = "Preview the cursor and live terminal overlays in the current workspace"
+
+    @classmethod
+    def poll(cls, context):
+        return not bpy.app.background
+
+    def execute(self, context):
+        if not activity_ui.start_demo():
+            self.report({"WARNING"}, "Enable Show agent activity first")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Agent activity preview started")
+        return {"FINISHED"}
+
+
 def _tag_redraw():
     for window in bpy.context.window_manager.windows:
         if window.screen is None:
             continue
         for area in window.screen.areas:
-            if area.type == "VIEW_3D":
-                area.tag_redraw()
+            area.tag_redraw()
 
 
 # ---------------------------------------------------------------------------
@@ -138,11 +194,11 @@ def _tag_redraw():
 # ---------------------------------------------------------------------------
 
 class AGENTMCP_PT_panel(bpy.types.Panel):
-    bl_label = "Agent MCP"
+    bl_label = "Blender for me"
     bl_idname = "AGENTMCP_PT_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Agent MCP"
+    bl_category = "Blender for me"
 
     def draw(self, context):
         layout = self.layout
@@ -167,6 +223,25 @@ class AGENTMCP_PT_panel(bpy.types.Panel):
             col.prop(prefs, "autostart")
             if os.environ.get(protocol.PORT_ENV_VAR):
                 box.label(text=f"{protocol.PORT_ENV_VAR} overrides the port", icon="INFO")
+
+        presence = layout.box()
+        row = presence.row()
+        row.label(text="Agent presence", icon="GHOST_ENABLED")
+        row.operator("agentmcp.preview_activity", text="Preview", icon="PLAY")
+        if prefs is not None:
+            presence.prop(prefs, "show_activity_overlay")
+            controls = presence.column(align=True)
+            controls.enabled = prefs.show_activity_overlay
+            controls.prop(prefs, "show_agent_cursor")
+            controls.prop(prefs, "show_terminal_overlay")
+            controls.prop(prefs, "activity_overlay_scale")
+            controls.prop(prefs, "terminal_hold_seconds")
+        activity = activity_ui.snapshot()
+        if activity.get("active"):
+            editor = str(activity.get("editor") or "editor").replace("_", " ").title()
+            presence.label(text=f"{activity['command']} · {editor}", icon="REC")
+            if activity.get("step"):
+                presence.label(text=f"step: {activity['step']}")
 
         stats = bridge.STATS
         info = box.row()
@@ -209,6 +284,7 @@ _CLASSES = (
     AGENTMCP_OT_start,
     AGENTMCP_OT_stop,
     AGENTMCP_OT_clear_log,
+    AGENTMCP_OT_preview_activity,
     AGENTMCP_PT_panel,
 )
 
@@ -216,6 +292,7 @@ _CLASSES = (
 def register():
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
+    activity_ui.register()
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
 
@@ -227,6 +304,7 @@ def unregister():
         bridge.stop_server()
     except Exception:
         pass
+    activity_ui.unregister()
     for cls in reversed(_CLASSES):
         try:
             bpy.utils.unregister_class(cls)

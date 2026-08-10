@@ -30,6 +30,8 @@ class FakeBridge:
 
     @staticmethod
     def _echo(req: dict) -> dict:
+        if req.get("cmd") == "handshake":
+            return {"id": req["id"], "ok": True, "result": {"protocol_version": 1, "session_id": "test"}}
         return {"id": req["id"], "ok": True, "result": {"echo": req.get("params")}}
 
     def _serve(self) -> None:
@@ -60,10 +62,13 @@ class FakeBridge:
                         continue
                     req = json.loads(line)
                     self.requests.append(req)
-                    if self.drop_after is not None and served >= self.drop_after:
-                        return  # simulate the bridge dying mid-session
-                    served += 1
-                    response = self.responder(req)
+                    if req.get("cmd") == "handshake":
+                        response = {"id": req["id"], "ok": True, "result": {"protocol_version": 1}}
+                    else:
+                        if self.drop_after is not None and served >= self.drop_after:
+                            return  # simulate the bridge dying mid-session
+                        served += 1
+                        response = self.responder(req)
                     if response is None:
                         continue  # simulate a hang
                     conn.sendall((json.dumps(response) + "\n").encode())
@@ -81,6 +86,19 @@ def bridge():
     server = FakeBridge()
     yield server
     server.close()
+
+
+def test_reconnects_once_after_the_bridge_drops():
+    """If connection drops post-send, BridgeError with outcome_unknown is raised to prevent duplicate execution."""
+    server = FakeBridge(drop_after=1)
+    try:
+        client = BridgeClient("127.0.0.1", server.port)
+        assert client.call("ping")["echo"] is not None   # first call succeeds
+        with pytest.raises(BridgeError) as excinfo:
+            client.call("ping")
+        assert excinfo.value.code == "outcome_unknown"
+    finally:
+        server.close()
 
 
 def test_roundtrip_returns_result(bridge):

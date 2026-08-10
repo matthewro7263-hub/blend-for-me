@@ -104,9 +104,92 @@ def temp_attrs(obj, **values) -> Iterator[None]:
                 pass
 
 
+@contextlib.contextmanager
+def preserve_context(
+    active_object: Optional[object] = None,
+    restore_elements: bool = False,
+) -> Iterator[dict]:
+    """Snapshot and restore mode, active/selected objects, mesh select mode, and element selection.
+
+    Args:
+        active_object: Optional object to set active during block.
+        restore_elements: If True, snapshots and restores vertex/edge/face selection state.
+    """
+    view_layer = bpy.context.view_layer
+    prior_active = view_layer.objects.active
+    prior_selected = [o for o in view_layer.objects if o.select_get()]
+    prior_mode = bpy.context.mode
+
+    prior_mesh_select_mode = None
+    vert_sel, edge_sel, poly_sel = None, None, None
+
+    target = active_object or prior_active
+    if target is not None and getattr(target, "type", None) == "MESH" and hasattr(target, "data") and target.data is not None:
+        prior_mesh_select_mode = tuple(bpy.context.tool_settings.mesh_select_mode)
+        if restore_elements and hasattr(target.data, "vertices"):
+            vert_sel = [v.index for v in target.data.vertices if v.select]
+            edge_sel = [e.index for e in target.data.edges if e.select]
+            poly_sel = [p.index for p in target.data.polygons if p.select]
+
+    if active_object is not None:
+        view_layer.objects.active = active_object
+        active_object.select_set(True)
+
+    snapshot = {
+        "prior_active": prior_active,
+        "prior_selected": prior_selected,
+        "prior_mode": prior_mode,
+        "prior_mesh_select_mode": prior_mesh_select_mode,
+    }
+
+    try:
+        yield snapshot
+    finally:
+        # 1. Restore object selection and active object
+        for o in view_layer.objects:
+            try:
+                o.select_set(o in prior_selected)
+            except Exception:
+                pass
+        if prior_active is not None and prior_active.name in view_layer.objects:
+            view_layer.objects.active = prior_active
+
+        # 2. Restore mode
+        if bpy.context.mode != prior_mode:
+            target_mode = prior_mode
+            if prior_mode == "EDIT_MESH":
+                target_mode = "EDIT"
+            try:
+                bpy.ops.object.mode_set(mode=target_mode)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    bpy.ops.object.mode_set(mode="OBJECT")
+
+        # 3. Restore mesh select mode & element selections
+        if target is not None and getattr(target, "type", None) == "MESH" and target.data is not None:
+            if prior_mesh_select_mode is not None:
+                with contextlib.suppress(Exception):
+                    bpy.context.tool_settings.mesh_select_mode = prior_mesh_select_mode
+
+            if restore_elements:
+                if vert_sel is not None:
+                    for idx in vert_sel:
+                        if idx < len(target.data.vertices):
+                            target.data.vertices[idx].select = True
+                if edge_sel is not None:
+                    for idx in edge_sel:
+                        if idx < len(target.data.edges):
+                            target.data.edges[idx].select = True
+                if poly_sel is not None:
+                    for idx in poly_sel:
+                        if idx < len(target.data.polygons):
+                            target.data.polygons[idx].select = True
+
+
 # ---------------------------------------------------------------------------
 # image capture
 # ---------------------------------------------------------------------------
+
 
 def _fit(width: int, height: int, max_size: int) -> Tuple[int, int]:
     """Scale (w, h) down so the long edge is at most ``max_size``."""

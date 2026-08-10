@@ -19,7 +19,7 @@
   "io",
   "docs"
  ],
- "bridge_command_count": 225,
+ "bridge_command_count": 226,
  "bridge_source": "blender-runtime",
  "tools": [
   {
@@ -1051,7 +1051,7 @@
    "name": "execute_python",
    "module": "core",
    "summary": "Run arbitrary Python inside Blender. The escape hatch \u2014 prefer a real tool.",
-   "description": "Run arbitrary Python inside Blender. The escape hatch \u2014 prefer a real tool.\n\n        Runs on Blender's main thread with `bpy` in scope. Returns captured\n        stdout, the repr of a trailing expression, and the full traceback on\n        failure (the call itself does not raise, so you always get the diagnosis).\n\n        Use it for genuinely novel operations. For anything the tool catalog\n        covers, the dedicated tool is safer: it pushes undo, validates arguments\n        and returns a structured result.",
+   "description": "Run arbitrary Python inside Blender. The escape hatch \u2014 prefer a real tool.\n\n        Runs on Blender's main thread with `bpy` in scope. Returns captured\n        stdout, the repr of a trailing expression, and the full traceback on\n        failure (the call itself does not raise, so you always get the diagnosis).\n\n        Two extra globals support visible custom work in GUI Blender:\n        `run_terminal(command, cwd=None, timeout=120, check=True)` runs a string\n        through zsh (or an argv list directly) and streams merged output into the\n        Agent Terminal overlay; `agent_activity.step(label, [node_x, node_y])`\n        moves the on-screen agent cursor during custom node-building loops.\n\n        Use it for genuinely novel operations. For anything the tool catalog\n        covers, the dedicated tool is safer: it pushes undo, validates arguments\n        and returns a structured result.",
    "needs_gui": false,
    "params": [
     {
@@ -1113,8 +1113,8 @@
   {
    "name": "health",
    "module": "core",
-   "summary": "Check whether the Blender bridge is reachable, and report what it can do.",
-   "description": "Check whether the Blender bridge is reachable, and report what it can do.\n\n        Call this first when anything else fails. Returns connection state plus,\n        when connected, the Blender version, whether Blender is running headless,\n        and whether a 3D Viewport exists (GUI-only tools need one).",
+   "summary": "Check whether the Blender bridge is reachable, and report full capabilities.",
+   "description": "Check whether the Blender bridge is reachable, and report full capabilities.",
    "needs_gui": false,
    "params": []
   },
@@ -10043,7 +10043,7 @@
    "module": "core",
    "mutates": true,
    "needs_gui": false,
-   "doc": "Run arbitrary Python inside Blender; returns stdout, last value and traceback."
+   "doc": "Run Python with live output, ``agent_activity`` and ``run_terminal`` helpers."
   },
   {
    "command": "geonodes.add_modifier",
@@ -11115,6 +11115,13 @@
    "mutates": true,
    "needs_gui": false,
    "doc": "Create or safely reuse an internal image for textures, masks or baking."
+  },
+  {
+   "command": "shading.describe_node",
+   "module": "shading",
+   "mutates": false,
+   "needs_gui": false,
+   "doc": "Instantiate a node in a temporary tree to inspect its sockets, defaults and properties."
   },
   {
    "command": "shading.get_node_graph",

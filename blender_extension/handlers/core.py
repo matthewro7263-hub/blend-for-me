@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import contextlib
-import io
+import codecs
+import os
+import selectors
+import signal
+import subprocess
 import sys
+import time
 import traceback
 
 import bpy
 
-from .. import bridge, ctx
+from .. import activity_ui, bridge, ctx, protocol
 from ..registry import HANDLERS, META, command
 
 
@@ -27,6 +32,9 @@ def ping(params: dict) -> dict:
 def get_version(params: dict) -> dict:
     """Blender, Python and bridge version info."""
     return {
+        "extension_id": "blender_agent_mcp",
+        "extension_version": "0.0.1-beta",
+        "protocol_version": protocol.PROTOCOL_VERSION,
         "blender_version": list(bpy.app.version),
         "blender_version_string": bpy.app.version_string,
         "build_branch": bpy.app.build_branch.decode() if isinstance(bpy.app.build_branch, bytes) else bpy.app.build_branch,
@@ -35,6 +43,7 @@ def get_version(params: dict) -> dict:
         "online_access": bool(getattr(bpy.app, "online_access", False)),
         "has_view3d": ctx.find_view3d() is not None,
         "bridge_port": bridge.current_port(),
+        "command_count": len(HANDLERS),
         "stats": dict(bridge.STATS),
     }
 
@@ -202,13 +211,102 @@ def redo(params: dict) -> dict:
 # escape hatch + RNA introspection
 # ---------------------------------------------------------------------------
 
+def _run_terminal(
+    command: str | list[str] | tuple[str, ...],
+    *,
+    cwd: str | None = None,
+    timeout: float = 120.0,
+    check: bool = True,
+) -> dict:
+    """Run a local command and stream its merged output through the agent UI."""
+    timeout = float(timeout)
+    if not 0.1 <= timeout <= 3600.0:
+        raise ValueError("terminal timeout must be between 0.1 and 3600 seconds")
+    if isinstance(command, str):
+        if not command.strip():
+            raise ValueError("terminal command cannot be empty")
+        argv = ["/bin/zsh", "-lc", command]
+        display = command
+    elif isinstance(command, (list, tuple)) and command:
+        argv = [str(part) for part in command]
+        if any(not part for part in argv):
+            raise ValueError("terminal command arguments cannot be empty")
+        display = argv
+    else:
+        raise TypeError("terminal command must be a string or non-empty list")
+
+    workdir = os.path.abspath(os.path.expanduser(os.fspath(cwd))) if cwd else None
+    if workdir is not None and not os.path.isdir(workdir):
+        raise NotADirectoryError(workdir)
+    activity_ui.set_terminal_command(display)
+
+    process = subprocess.Popen(
+        argv,
+        cwd=workdir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=0,
+        start_new_session=True,
+    )
+    assert process.stdout is not None
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    started = time.monotonic()
+    try:
+        while selector.get_map():
+            if time.monotonic() - started > timeout:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=1.0)
+                raise TimeoutError(f"terminal command exceeded {timeout:g} seconds")
+
+            events = selector.select(timeout=0.05)
+            for key, _mask in events:
+                chunk = os.read(key.fileobj.fileno(), 4096)
+                if chunk:
+                    print(decoder.decode(chunk), end="", flush=True)
+                else:
+                    selector.unregister(key.fileobj)
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            print(tail, end="", flush=True)
+        returncode = process.wait()
+    finally:
+        selector.close()
+        process.stdout.close()
+
+    result = {
+        "command": command,
+        "cwd": workdir or os.getcwd(),
+        "returncode": returncode,
+    }
+    if check and returncode:
+        raise subprocess.CalledProcessError(returncode, command)
+    return result
+
 @command("execute_python", mutates=True)
 def execute_python(params: dict) -> dict:
-    """Run arbitrary Python inside Blender; returns stdout, last value and traceback."""
+    """Run Python with live output, ``agent_activity`` and ``run_terminal`` helpers."""
     code = params["code"]
-    globals_ns = {"bpy": bpy, "__name__": "__agent__"}
+    globals_ns = {
+        "bpy": bpy,
+        "agent_activity": activity_ui,
+        "run_terminal": _run_terminal,
+        "__name__": "__agent__",
+    }
 
-    stdout, stderr = io.StringIO(), io.StringIO()
+    stdout = activity_ui.LiveTextStream("stdout")
+    stderr = activity_ui.LiveTextStream("stderr")
     result_repr = None
     error = None
     tb = None
@@ -229,7 +327,9 @@ def execute_python(params: dict) -> dict:
             if last_expr is not None:
                 value = eval(compile(last_expr, "<agent>", "eval"), globals_ns)
                 result_repr = repr(value)[:4000]
-    except Exception as exc:
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, GeneratorExit)):
+            raise
         error = f"{type(exc).__name__}: {exc}"
         tb = traceback.format_exc()
 
@@ -333,13 +433,9 @@ def viewport_screenshot(params: dict) -> dict:
 
 
 def _describe_render(path: str) -> dict:
-    """Sample a rendered image and say whether anything is actually in it.
+    """Sample a rendered image efficiently without materializing all pixel objects."""
+    import array
 
-    A render that returns fully transparent or a single flat colour is reported
-    by Blender as a success. For an agent that is the worst possible outcome:
-    silent empty output leaves nothing to react to. Sampling is capped so this
-    stays cheap on large frames.
-    """
     verdict = {"checked": False}
     image = None
     try:
@@ -349,22 +445,26 @@ def _describe_render(path: str) -> dict:
         if not width or not height:
             return {"checked": False, "note": "image reported zero size"}
 
-        pixels = image.pixels[:]
         total = width * height
-        step = max(1, total // 20000)  # cap the sample regardless of resolution
+        total_floats = total * channels
+        step = max(1, total // 20000)
+
+        # Allocate contiguous float array and retrieve via foreach_get
+        buf = array.array("f", [0.0] * total_floats)
+        image.pixels.foreach_get(buf)
 
         alpha_max = 0.0
         lo, hi = 1e9, -1e9
         sampled = 0
         for index in range(0, total, step):
             base = index * channels
-            rgb = pixels[base:base + 3]
-            if not rgb:
-                break
-            lo = min(lo, *rgb)
-            hi = max(hi, *rgb)
+            r = buf[base]
+            g = buf[base + 1] if channels >= 2 else r
+            b = buf[base + 2] if channels >= 3 else r
+            lo = min(lo, r, g, b)
+            hi = max(hi, r, g, b)
             if channels >= 4:
-                alpha_max = max(alpha_max, pixels[base + 3])
+                alpha_max = max(alpha_max, buf[base + 3])
             sampled += 1
 
         verdict = {
@@ -377,21 +477,17 @@ def _describe_render(path: str) -> dict:
         if channels >= 4 and alpha_max <= 1e-6:
             verdict["blank"] = True
             verdict["warning"] = (
-                "the render is fully transparent — nothing was visible to the "
-                "camera. Check the camera is aimed at the subject "
-                "(objects.frame_object), that the objects are not hidden in "
-                "render, and that the film is not set to transparent with no "
-                "geometry in frame."
+                "the render is fully transparent — nothing was visible to the camera."
             )
         elif sampled and (hi - lo) <= 1e-6:
             verdict["blank"] = True
             verdict["warning"] = (
-                f"the render is a single flat colour (value {round(hi, 4)}) — most "
-                "likely nothing is in frame or there is no light in the scene."
+                f"the render is a single flat colour (value {round(hi, 4)}) — "
+                "most likely nothing is in frame or there is no light in the scene."
             )
         else:
             verdict["blank"] = False
-    except Exception as exc:  # never fail a good render because the check broke
+    except Exception as exc:
         verdict = {"checked": False, "note": f"could not inspect: {type(exc).__name__}: {exc}"}
     finally:
         if image is not None:
@@ -429,11 +525,10 @@ def render_frame(params: dict) -> dict:
             engine = engine.upper()
             if engine == "CYCLES":
                 gpu_info = ctx.enable_cycles_metal()
-            valid = [i.identifier for i in
-                     bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items]
-            if engine not in valid:
-                raise ValueError(f"engine {engine!r} unavailable; valid: {valid}")
-            scene.render.engine = engine
+            try:
+                scene.render.engine = engine
+            except Exception as exc:
+                raise ValueError(f"engine {engine!r} unavailable or invalid: {exc}") from exc
 
         if resolution:
             scene.render.resolution_x = int(resolution[0])

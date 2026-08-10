@@ -131,6 +131,41 @@ MCP client ──stdio──▶ mcp_server ──TCP 127.0.0.1:9876──▶ Ble
 `bpy.app.timers` callback drains that queue on Blender's main thread and hands
 results back. Nothing touches Blender state off the main thread.
 
+### Visible agent presence
+
+GUI Blender shows what the connected agent is doing instead of leaving its work
+invisible:
+
+- The supplied upward cursor SVG is rendered as a crisp Blender GPU overlay in
+  the relevant editor: shader/geometry/compositor nodes, UV/Image Editor,
+  animation editors, Video Sequencer, or the 3D Viewport fallback.
+- The cursor rests with a gentle left tilt and idle wiggle. During travel it
+  rotates its tip into the direction of motion, follows a damped spring path,
+  and smoothly settles back into its tilted pose at the destination.
+- Retry-safe shader graph builds move the cursor after each real node mutation,
+  so node construction is visible while it happens. Custom Python graph loops
+  can call `agent_activity.step("Blur", [x, y])` for the same behavior.
+- `execute_python` sends the cursor off the editor's right edge, then has it drag
+  a macOS-style **Agent Terminal** into the center. The command types in before
+  streaming stdout/stderr; the cursor waits outside the lower-right corner,
+  clicks the red control on completion, and carries on as the window closes.
+- Python gets a `run_terminal(command, cwd=None, timeout=120, check=True)` helper.
+  It streams a zsh command string—or an argv list without a shell—into that
+  terminal as it runs.
+
+```python
+execute_python(
+    code="run_terminal('python3 -u render_preview.py', cwd='/path/to/show')",
+    timeout=180,
+)
+```
+
+The **Agent MCP** N-panel has toggles for the cursor, terminal, overlay scale and
+pre-close pause, plus a **Preview** button. Overlays are disabled safely in
+headless Blender. Commands an agent runs completely outside this MCP bridge
+cannot be observed; use `run_terminal` when their live output should appear in
+Blender.
+
 ### Wire protocol
 
 JSON, one object per line, over TCP.
@@ -348,8 +383,9 @@ Run the command by hand to see the real error:
 * The bridge binds **loopback only** and has no authentication — anything already
   running as your user on this machine can drive Blender through it. Stop the
   server when you are not using it.
-* `execute_python` runs arbitrary code inside Blender with your privileges. It is
-  the deliberate escape hatch; prefer the specific tool when one exists.
+* `execute_python` runs arbitrary code inside Blender with your privileges. Its
+  `run_terminal` helper can also run local shell commands. They are deliberate
+  escape hatches; prefer the specific tool when one exists.
 * Destructive file operations (`open_blend`, overwriting with `save_blend`)
   refuse unless called with `confirm: true`.
 

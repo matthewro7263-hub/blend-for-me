@@ -9,3 +9,14 @@ build/
 *.egg-info/
 uv.lock
 /tmp/
+Test 3D models/
+*.blend
+*.blend1
+*.fbx
+*.obj
+*.gltf
+*.glb
+*.stl
+*.ply
+*.usdc
+*.abc

@@ -255,3 +255,30 @@ Verified live while adding production authoring tools:
 * Generated images, text/color/image/sound strips, two-camera markers, bulk
   slotted-action keys and a final headless two-frame sequencer PNG render are all
   covered by `tests/headless_smoke.py` rather than only by introspection.
+
+## 11. Agent activity overlay APIs
+
+Verified live in GUI Blender 5.2 while adding the Blend for me presence UI:
+
+* `SpaceView3D`, `SpaceNodeEditor`, `SpaceSequenceEditor`,
+  `SpaceDopeSheetEditor`, `SpaceGraphEditor`, `SpaceImageEditor`, and
+  `SpaceTextEditor` all expose `draw_handler_add/remove` and accept a
+  `WINDOW` / `POST_PIXEL` callback using `gpu`, `gpu_extras.batch`, and `blf`.
+* `bpy.data.images.load()` does **not** decode SVG; it returns a zero-sized image
+  and logs `unknown file-format`. The extension therefore packages the original
+  cursor SVG, samples its cubic Bézier path, and draws the vector geometry.
+* `mathutils.geometry.tessellate_polygon` returns no faces for this clockwise
+  contour as 2D vectors in 5.2. Supplying 3D vectors works, but returns triangle
+  **indices** rather than vectors; the loader handles that form explicitly.
+* Editor sidebars are overlay regions. Their open `UI` region width must be
+  deducted when placing a right-anchored terminal, or the sidebar covers it.
+* `bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)` can expose
+  synchronous main-thread Python output as it arrives. Calls are rate-limited and
+  capped during node batches; ordinary animation uses `bpy.app.timers` redraws.
+  The operator emits `Draw window and swap` timing diagnostics through redirected
+  stdout, so `LiveTextStream` filters those internal lines from both the overlay
+  and the `execute_python` result.
+* The terminal choreography is time-based rather than event-loop-step-based, so
+  it remains smooth when redraw cadence varies: leave right, spring-drag to
+  center, type, wait at lower right, travel to red, click, close. Cursor geometry
+  rotates around its SVG tip and eases back to an 18-degree left idle tilt.

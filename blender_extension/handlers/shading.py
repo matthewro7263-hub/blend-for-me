@@ -10,7 +10,7 @@ import tempfile
 
 import bpy
 
-from .. import ctx
+from .. import activity_ui, ctx
 from ..registry import command
 
 #: Principled BSDF sockets renamed in 4.x and still current in 5.2 — see
@@ -34,6 +34,70 @@ _RENAMED_SOCKETS = {
 # Keeping the agent id on the node makes large graph builds retry-safe and lets
 # every existing single-node command address the same node later by that id.
 _AGENT_ID_PROP = "_blender_agent_id"
+
+
+@command("shading.describe_node")
+def describe_node(params: dict) -> dict:
+    """Instantiate a node in a temporary tree to inspect its sockets, defaults and properties."""
+    node_type = str(params["type"])
+
+    temp_mat = bpy.data.materials.new("temp_inspect_node")
+    temp_mat.use_nodes = True
+    tree = temp_mat.node_tree
+    try:
+        node = tree.nodes.new(node_type)
+    except Exception as exc:
+        bpy.data.materials.remove(temp_mat)
+        raise ValueError(f"invalid node type {node_type!r}: {exc}") from exc
+
+    try:
+        inputs = []
+        for i, sock in enumerate(node.inputs):
+            default_val = None
+            if hasattr(sock, "default_value"):
+                try:
+                    default_val = list(sock.default_value) if hasattr(sock.default_value, "__iter__") and not isinstance(sock.default_value, (str, bytes)) else sock.default_value
+                except Exception:
+                    default_val = str(sock.default_value)
+            inputs.append({
+                "index": i,
+                "name": sock.name,
+                "identifier": sock.identifier,
+                "type": sock.type,
+                "default": default_val,
+            })
+
+        outputs = []
+        for i, sock in enumerate(node.outputs):
+            outputs.append({
+                "index": i,
+                "name": sock.name,
+                "identifier": sock.identifier,
+                "type": sock.type,
+            })
+
+        props = {}
+        for p in node.bl_rna.properties:
+            if p.identifier in {"rna_type", "name", "location", "width", "height", "select", "inputs", "outputs"}:
+                continue
+            if not p.is_readonly:
+                props[p.identifier] = {
+                    "type": p.type,
+                    "description": p.description,
+                }
+                if p.type == "ENUM":
+                    props[p.identifier]["enum_items"] = [item.identifier for item in p.enum_items]
+
+        return {
+            "type": node.type,
+            "bl_idname": node.bl_idname,
+            "name": node.name,
+            "inputs": inputs,
+            "outputs": outputs,
+            "properties": props,
+        }
+    finally:
+        bpy.data.materials.remove(temp_mat)
 
 
 # ---------------------------------------------------------------------------
@@ -468,54 +532,80 @@ def assign_material(params: dict) -> dict:
     to_faces = bool(params.get("to_selected_faces", False))
     slots = obj.data.materials
 
-    if slot is None:
-        existing = next((i for i, m in enumerate(slots) if m is not None and m.name == mat.name), None)
-        if existing is not None:
-            slot = existing
-        elif len(slots) and not to_faces:
-            # Whole-object assignment mirrors the Properties editor: overwrite the
-            # active slot rather than adding one no face points at.
-            slot = min(obj.active_material_index, len(slots) - 1)
-            slots[slot] = mat
-        else:
-            # Per-face assignment must not disturb the faces already using the
-            # active slot, so give the material a slot of its own.
-            slots.append(mat)
-            slot = len(slots) - 1
-    else:
-        slot = int(slot)
-        if slot < 0:
-            raise ValueError(f"slot must be >= 0, got {slot}")
-        while len(slots) <= slot:
-            slots.append(None)
-        slots[slot] = mat
-
-    faces = 0
+    # Preflight check for face selection BEFORE modifying material slots
     if to_faces:
         if obj.type != "MESH":
             raise TypeError(f"to_selected_faces needs a MESH, {obj_name!r} is {obj.type}")
         if obj.mode == "EDIT":
             import bmesh
-
             bm = bmesh.from_edit_mesh(obj.data)
-            for face in bm.faces:
-                if face.select:
-                    face.material_index = slot
-                    faces += 1
-            bmesh.update_edit_mesh(obj.data)
+            selected_count = sum(1 for face in bm.faces if face.select)
         else:
-            for poly in obj.data.polygons:
-                if poly.select:
-                    poly.material_index = slot
-                    faces += 1
-        if faces == 0:
+            selected_count = sum(1 for poly in obj.data.polygons if poly.select)
+
+        if selected_count == 0:
             raise RuntimeError(
                 "no faces are selected, so nothing was assigned. Select faces in Edit "
                 "Mode first, or call again with to_selected_faces=false to give the "
                 "whole object this material."
             )
-    else:
-        obj.active_material_index = slot
+
+    # Snapshot previous slots state and polygon material indices for rollback safety
+    saved_slots = list(slots)
+    saved_active = getattr(obj, "active_material_index", 0)
+    saved_poly_indices = None
+    if to_faces and hasattr(obj.data, "polygons"):
+        saved_poly_indices = [p.material_index for p in obj.data.polygons]
+
+    try:
+        if slot is None:
+            existing = next((i for i, m in enumerate(slots) if m is not None and m.name == mat.name), None)
+            if existing is not None:
+                slot = existing
+            elif len(slots) and not to_faces:
+                slot = min(obj.active_material_index, len(slots) - 1)
+                slots[slot] = mat
+            else:
+                slots.append(mat)
+                slot = len(slots) - 1
+        else:
+            slot = int(slot)
+            if slot < 0:
+                raise ValueError(f"slot must be >= 0, got {slot}")
+            while len(slots) <= slot:
+                slots.append(None)
+            slots[slot] = mat
+
+        faces = 0
+        if to_faces:
+            if obj.mode == "EDIT":
+                import bmesh
+                bm = bmesh.from_edit_mesh(obj.data)
+                for face in bm.faces:
+                    if face.select:
+                        face.material_index = slot
+                        faces += 1
+                bmesh.update_edit_mesh(obj.data)
+            else:
+                for poly in obj.data.polygons:
+                    if poly.select:
+                        poly.material_index = slot
+                        faces += 1
+        else:
+            obj.active_material_index = slot
+
+    except Exception:
+        # Rollback slot state on failure
+        slots.clear()
+        for s in saved_slots:
+            slots.append(s)
+        if hasattr(obj, "active_material_index"):
+            obj.active_material_index = saved_active
+        if saved_poly_indices is not None and hasattr(obj.data, "polygons"):
+            for i, p_idx in enumerate(saved_poly_indices):
+                if i < len(obj.data.polygons):
+                    obj.data.polygons[i].material_index = p_idx
+        raise
 
     return {
         "object": obj.name,
@@ -827,6 +917,10 @@ def build_node_graph(params: dict) -> dict:
         if spec.get("color_ramp") is not None:
             ramps[agent_id] = _apply_color_ramp(node, spec["color_ramp"])
         node_map[agent_id] = node
+        activity_ui.step(
+            spec.get("label") or agent_id,
+            spec.get("location") or tuple(node.location),
+        )
 
     # Frames/parents can only resolve after every node exists.
     for spec in normalized:

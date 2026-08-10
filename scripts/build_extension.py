@@ -112,8 +112,11 @@ def verify(zip_path: pathlib.Path, manifest: dict) -> None:
         prefix = f"{manifest['id']}/"
         if f"{prefix}blender_manifest.toml" not in names:
             sys.exit(f"error: manifest missing from zip (roots seen: {sorted(roots)})")
-    required = ["blender_manifest.toml", "__init__.py", "bridge.py", "ctx.py",
-                "protocol.py", "registry.py", "handlers/__init__.py"]
+    required = [
+        "blender_manifest.toml", "__init__.py", "activity_model.py",
+        "activity_ui.py", "assets/agent_cursor.svg", "bridge.py", "ctx.py",
+        "protocol.py", "registry.py", "handlers/__init__.py",
+    ]
     missing = [r for r in required if f"{prefix}{r}" not in names]
     if missing:
         sys.exit(f"error: zip is missing {missing}")

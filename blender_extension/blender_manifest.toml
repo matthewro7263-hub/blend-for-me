@@ -1,8 +1,8 @@
 schema_version = "1.0.0"
 
 id = "blender_agent_mcp"
-version = "0.1.0"
-name = "Agent MCP Bridge"
+version = "0.0.1-beta"
+name = "Blender for me"
 tagline = "Local TCP bridge that lets AI agents drive Blender over MCP"
 maintainer = "blender-agent-mcp contributors <noreply@example.com>"
 type = "add-on"

@@ -28,7 +28,7 @@ if str(REPO) not in sys.path:
 import bpy  # noqa: E402
 
 import blender_extension  # noqa: E402
-from blender_extension import bridge, ctx, registry  # noqa: E402
+from blender_extension import activity_ui, bridge, ctx, registry  # noqa: E402
 
 H = registry.HANDLERS
 PASSED: list[str] = []
@@ -109,7 +109,64 @@ def main() -> None:
     run("execute_python", {"code": "1 + 1"}, check=lambda r: r["result"] == "2")
     run("execute_python", {"code": "raise ValueError('x')"},
         check=lambda r: r["error"] is not None and r["traceback"])
+    run("execute_python", {
+        "code": "run_terminal(['printf', 'streamed-output'])",
+    }, check=lambda r: r["stdout"] == "streamed-output"
+        and "'returncode': 0" in (r["result"] or ""))
+    run("execute_python", {
+        "code": "run_terminal(['/bin/sh', '-c', 'exit 7'])",
+    }, check=lambda r: "CalledProcessError" in (r["error"] or "")
+        and "exit status 7" in (r["error"] or ""))
     run("undo_checkpoint", {"label": "smoke"})
+
+    section("activity choreography model")
+    try:
+        class FakeArea:
+            regions = []
+
+        class FakeRegion:
+            width = 1200
+            height = 800
+
+        started = 10.0
+        activity = activity_ui._Activity(
+            msg_id="motion",
+            command="execute_python",
+            area_pointer=None,
+            area_type="VIEW_3D",
+            tree_type=None,
+            started_at=started,
+            terminal=True,
+            terminal_command="echo hello",
+            terminal_command_set_at=started,
+        )
+        seek = activity_ui._terminal_motion(FakeArea(), FakeRegion(), activity, started + 0.20)
+        drag = activity_ui._terminal_motion(FakeArea(), FakeRegion(), activity, started + 0.62)
+        activity.finished_at = started + 1.5
+        click_start = activity_ui._terminal_click_start(activity)
+        assert click_start is not None
+        click = activity_ui._terminal_motion(
+            FakeArea(), FakeRegion(), activity,
+            click_start + activity_ui._TERMINAL_CLICK_TRAVEL
+            + activity_ui._TERMINAL_CLICK_PRESS * 0.5,
+        )
+        close_start = activity_ui._terminal_close_start(activity)
+        assert close_start is not None
+        closing = activity_ui._terminal_motion(
+            FakeArea(), FakeRegion(), activity,
+            close_start + activity_ui._TERMINAL_CLOSE * 0.5,
+        )
+        assert seek.cursor_x > 600
+        assert drag.x < FakeRegion.width
+        assert click.click > 0.95
+        assert closing.scale < 1.0 and closing.alpha < 1.0
+        stream = activity_ui.LiveTextStream("stdout")
+        stream.write("Warning: 1 × Draw window and swap: 4.2 ms\n")
+        stream.write("real output\n")
+        assert stream.getvalue() == "real output\n"
+        PASSED.append("activity terminal choreography")
+    except Exception as exc:
+        FAILED.append(("activity terminal choreography", f"{type(exc).__name__}: {exc}"))
 
     section("objects")
     run("objects.create_primitive", {"kind": "UV_SPHERE", "location": [0, 0, 0]},
@@ -150,6 +207,67 @@ def main() -> None:
     run("properties.remove", {
         "target_type": "OBJECT", "target": "SmokeCube", "key": "shot_role",
     }, check=lambda r: r["removed"] == "shot_role")
+
+    section("Phase 1 data-integrity regressions")
+    # 1. Custom property rollback
+    run("properties.set", {
+        "target_type": "OBJECT", "target": "SmokeCube", "key": "rollback_test",
+        "value": 123, "min": 0.0, "max": 200.0,
+    }, check=lambda r: r["value"] == 123)
+    run("properties.set", {
+        "target_type": "OBJECT", "target": "SmokeCube", "key": "rollback_test",
+        "value": 456, "subtype": "INVALID_SUBTYPE_NAME",
+    }, expect=ValueError)
+    cube_obj = bpy.data.objects["SmokeCube"]
+    assert cube_obj["rollback_test"] == 123, f"property overwritten on failure: {cube_obj['rollback_test']}"
+
+    run("properties.set", {
+        "target_type": "OBJECT", "target": "SmokeCube", "key": "new_rollback_test",
+        "value": 789, "subtype": "INVALID_SUBTYPE_NAME",
+    }, expect=ValueError)
+    assert "new_rollback_test" not in cube_obj, "failed new property was not removed"
+
+    run("properties.remove", {
+        "target_type": "OBJECT", "target": "SmokeCube", "key": "rollback_test",
+    })
+
+    # 2. Material assignment atomicity
+    for p in cube_obj.data.polygons:
+        p.select = False
+    initial_slots = len(cube_obj.data.materials)
+    run("shading.create_material", {"name": "Phase1Mat"})
+    run("shading.assign_material", {
+        "object": "SmokeCube", "material": "Phase1Mat", "to_selected_faces": True,
+    }, expect=RuntimeError)
+    assert len(cube_obj.data.materials) == initial_slots, (
+        f"slots changed on zero face selection failure: {len(cube_obj.data.materials)} != {initial_slots}"
+    )
+
+    # 3. UV mode and selection restoration
+    bpy.context.view_layer.objects.active = cube_obj
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.context.tool_settings.mesh_select_mode = (True, False, False)
+    run("uv.smart_project", {"object": "SmokeCube"})
+    assert bpy.context.mode == "EDIT_MESH", f"UV operation changed mode to {bpy.context.mode}"
+    assert tuple(bpy.context.tool_settings.mesh_select_mode) == (True, False, False), (
+        f"mesh select mode changed to {tuple(bpy.context.tool_settings.mesh_select_mode)}"
+    )
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    # 4. Cycles engine acceptance
+    run("settings.set_render", {"engine": "CYCLES"}, check=lambda r: r["render"]["engine"] == "CYCLES")
+    assert bpy.context.scene.render.engine == "CYCLES", "render engine not set to CYCLES"
+    run("settings.set_render", {"engine": "BLENDER_EEVEE"})
+
+    # 5. Weights atomicity
+    run("weights.vgroup_create", {"mesh": "SmokeCube", "name": "AtomicWeights"})
+    run("weights.set_weights", {
+        "mesh": "SmokeCube", "group": "AtomicWeights",
+        "weights": {"0": 0.75, "99999": 0.5},
+    }, expect=IndexError)
+    grp = cube_obj.vertex_groups["AtomicWeights"]
+    weights_v0 = [g.weight for g in cube_obj.data.vertices[0].groups if g.group == grp.index]
+    assert not weights_v0, f"vertex 0 weight mutated despite later error: {weights_v0}"
 
     section("bridge parameter validation")
     run_bridge(
