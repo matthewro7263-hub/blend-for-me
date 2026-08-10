@@ -1,6 +1,6 @@
 # blender-agent-mcp (MCP server)
 
-stdio MCP server that relays tool calls to the Agent MCP Bridge extension running
+stdio MCP server that relays tool calls to the Blend for me extension running
 inside Blender. See the repository root `README.md` for installation and setup.
 
 ```bash

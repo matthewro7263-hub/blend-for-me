@@ -239,15 +239,27 @@ def drain_once(timeout: float = 0.0) -> int:
 # socket side (never touches bpy)
 # --------------------------------------------------------------------------
 
+import uuid
+
+
 class _BridgeServer:
     def __init__(self, host: str, port: int):
         self.host = host
         self.port = port
+        self.session_id = uuid.uuid4().hex
         self._sock: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._clients: list[socket.socket] = []
         self._clients_lock = threading.Lock()
+
+    @property
+    def pairing_token(self) -> str | None:
+        return os.environ.get(protocol.TOKEN_ENV_VAR)
+
+    @property
+    def allow_insecure(self) -> bool:
+        return os.environ.get(protocol.ALLOW_INSECURE_ENV_VAR) == "1"
 
     # -- lifecycle ------------------------------------------------------
     def start(self) -> None:
@@ -260,7 +272,7 @@ class _BridgeServer:
         self._sock = sock
         self._thread = threading.Thread(target=self._accept_loop, name="agentmcp-accept", daemon=True)
         self._thread.start()
-        log(f"listening on {self.host}:{self.port}")
+        log(f"listening on {self.host}:{self.port} session={self.session_id[:8]}")
 
     def stop(self) -> None:
         self._stop.set()
@@ -357,6 +369,19 @@ class _BridgeServer:
             self._send(conn, cached)
             return
 
+        # Token authentication verification
+        expected = self.pairing_token
+        if expected and not self.allow_insecure:
+            req_token = params.get("token") or params.get("_token")
+            if not protocol.verify_pairing_token(req_token, expected):
+                res = protocol.err(
+                    msg_id,
+                    "authentication failed: invalid or missing pairing token",
+                    code=protocol.ErrorCode.AUTH_FAILED,
+                )
+                self._send(conn, res)
+                return
+
         # Built-in socket thread commands
         if cmd == "handshake":
             req_version = int(params.get("protocol_version", protocol.PROTOCOL_VERSION))
@@ -380,6 +405,7 @@ class _BridgeServer:
                     "blender_version": bl_ver,
                     "session_id": getattr(self, "session_id", "default_session"),
                     "paired": True,
+                    "auth_mode": "token" if expected and not self.allow_insecure else "insecure",
                     "max_line_bytes": protocol.MAX_LINE_BYTES,
                 },
             )

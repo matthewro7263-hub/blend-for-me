@@ -194,11 +194,11 @@ def _tag_redraw():
 # ---------------------------------------------------------------------------
 
 class AGENTMCP_PT_panel(bpy.types.Panel):
-    bl_label = "Blender for me"
+    bl_label = "Blend for me"
     bl_idname = "AGENTMCP_PT_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Blender for me"
+    bl_category = "Agent MCP"
 
     def draw(self, context):
         layout = self.layout

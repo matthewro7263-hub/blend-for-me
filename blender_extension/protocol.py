@@ -24,6 +24,9 @@ MAX_LINE_BYTES = 64 * 1024 * 1024  # 64 MiB; screenshots are base64 and can be l
 
 PROTOCOL_VERSION = 1
 
+TOKEN_ENV_VAR = "BLENDER_AGENT_TOKEN"
+ALLOW_INSECURE_ENV_VAR = "BLENDER_AGENT_ALLOW_INSECURE"
+
 #: Structured Error Codes
 class ErrorCode:
     VALIDATION_ERROR = "validation_error"
@@ -32,6 +35,8 @@ class ErrorCode:
     NEEDS_GUI = "needs_gui"
     DESTRUCTIVE_CONFIRMATION_REQUIRED = "destructive_confirmation_required"
     PERMISSION_ERROR = "permission_error"
+    AUTH_REQUIRED = "auth_required"
+    AUTH_FAILED = "auth_failed"
     PROTOCOL_MISMATCH = "protocol_mismatch"
     WRONG_PEER = "wrong_peer"
     NOT_CONNECTED = "not_connected"
@@ -49,6 +54,22 @@ class ProtocolError(ValueError):
     def __init__(self, message: str, code: str = ErrorCode.VALIDATION_ERROR):
         super().__init__(message)
         self.code = code
+
+
+import hmac
+import secrets
+
+
+def generate_pairing_token() -> str:
+    """Generate a 256-bit cryptographically secure pairing token."""
+    return secrets.token_hex(32)
+
+
+def verify_pairing_token(token: str | None, expected_token: str | None) -> bool:
+    """Compare token and expected_token in constant time."""
+    if not token or not expected_token:
+        return False
+    return hmac.compare_digest(str(token).strip().encode("utf-8"), str(expected_token).strip().encode("utf-8"))
 
 
 def encode(obj: dict) -> bytes:

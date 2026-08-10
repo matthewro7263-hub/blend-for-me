@@ -51,7 +51,7 @@ Run this every session, before any other tool. Never act on an assumed scene.
 If `health` reports not connected, tell the user exactly this:
 
 > Blender isn't reachable. Please: (1) open the Blender desktop app, (2) Edit ▸
-> Preferences ▸ Add-ons and enable **Agent MCP Bridge**, (3) in the 3D Viewport
+> Preferences ▸ Add-ons and enable **Blend for me**, (3) in the 3D Viewport
 > press **N**, open the **Agent MCP** tab and press **Start Server**, (4) check
 > the port shown there is 9876 (or tell me which port it uses).
 

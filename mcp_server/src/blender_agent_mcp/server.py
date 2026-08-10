@@ -17,8 +17,8 @@ INSTRUCTIONS = """\
 Drive Blender directly: model, sculpt, rig, weight-paint, shade, animate and export.
 
 Connection: tools relay to a loopback bridge inside a running Blender. If a tool
-reports it cannot reach Blender, tell the user to enable the 'Blender for me'
-add-on and press Start Server in the 3D Viewport's N-panel ▸ Blender for me tab.
+reports it cannot reach Blender, tell the user to enable the 'Blend for me'
+add-on and press Start Server in the 3D Viewport's N-panel ▸ Agent MCP tab.
 
 Working effectively:
 * Call `get_scene_info` before acting so you address objects by their real names.
@@ -33,7 +33,7 @@ Working effectively:
 """
 
 mcp = MCPServer(
-    name="Blender for me",
+    name="Blend for me",
     version="0.0.1-beta",
     instructions=INSTRUCTIONS,
 )

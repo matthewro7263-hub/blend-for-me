@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import socket
+import sys
 import threading
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import pytest
 
@@ -88,7 +94,7 @@ def bridge():
     server.close()
 
 
-def test_reconnects_once_after_the_bridge_drops():
+def test_post_send_drop_raises_outcome_unknown():
     """If connection drops post-send, BridgeError with outcome_unknown is raised to prevent duplicate execution."""
     server = FakeBridge(drop_after=1)
     try:
@@ -169,8 +175,8 @@ def test_no_response_raises_timeout():
         server.close()
 
 
-def test_reconnects_once_after_the_bridge_drops():
-    """Restarting Blender must not require the agent to call reconnect by hand."""
+def test_reconnect_on_new_request_after_bridge_restart():
+    """Restarting Blender must transparently establish connection on next request if pre-send."""
     server = FakeBridge(drop_after=1)
     try:
         client = BridgeClient("127.0.0.1", server.port)
@@ -216,3 +222,17 @@ def test_explicit_port_beats_environment(monkeypatch):
 def test_get_client_is_a_singleton():
     bridge_client._client = None
     assert bridge_client.get_client() is bridge_client.get_client()
+
+
+def test_pairing_token_verification():
+    import importlib.util
+    proto_path = REPO_ROOT / "blender_extension" / "protocol.py"
+    spec = importlib.util.spec_from_file_location("blender_extension_protocol", proto_path)
+    protocol = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(protocol)
+
+    tok = protocol.generate_pairing_token()
+    assert len(tok) == 64
+    assert protocol.verify_pairing_token(tok, tok) is True
+    assert protocol.verify_pairing_token(tok, "wrong_token") is False
+    assert protocol.verify_pairing_token("", tok) is False

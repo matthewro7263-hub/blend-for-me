@@ -24,7 +24,7 @@ NOT_CONNECTED_HELP = (
     "Could not reach Blender on {host}:{port}.\n"
     "Fix it like this:\n"
     "  1. Open Blender (the GUI app, not --background).\n"
-    "  2. Edit ▸ Preferences ▸ Add-ons — enable 'Agent MCP Bridge'.\n"
+    "  2. Edit ▸ Preferences ▸ Add-ons — enable 'Blend for me'.\n"
     "  3. In the 3D Viewport press N ▸ 'Agent MCP' tab ▸ Start Server.\n"
     "  4. Confirm the port matches ({port}); override it with the "
     "{env} environment variable if you changed it.\n"
@@ -79,10 +79,14 @@ class BridgeClient:
 
         if handshake:
             handshake_id = str(next(self._ids))
+            token = os.environ.get("BLENDER_AGENT_TOKEN")
+            hs_params = {"protocol_version": 1, "_client_id": self.client_id}
+            if token:
+                hs_params["_token"] = token
             hs_frame = (json.dumps({
                 "id": handshake_id,
                 "cmd": "handshake",
-                "params": {"protocol_version": 1, "_client_id": self.client_id}
+                "params": hs_params
             }, separators=(",", ":")) + "\n").encode("utf-8")
             try:
                 self._sock.sendall(hs_frame)
@@ -118,6 +122,9 @@ class BridgeClient:
         payload = dict(params or {})
         payload["_timeout"] = timeout
         payload["_client_id"] = self.client_id
+        token = os.environ.get("BLENDER_AGENT_TOKEN")
+        if token:
+            payload["_token"] = token
 
         with self._lock:
             if self._sock is None:

@@ -82,7 +82,7 @@ Translate before you act:
 | `this scene has never been saved, so there is no path to save to.` | Bare `save_blend()` on an unsaved scene | `save_blend(path="/Users/you/work/scene.blend")`. |
 | Response is enormous / truncated | Unpaged `get_weights`, oversized screenshot | Page with `offset`/`limit`; cap `max_size`. See below. |
 | UVs and vertex groups vanished after a remesh | `voxel_remesh` rebuilds topology from scratch | Expected. Remesh *before* unwrapping and weighting — order of operations below. |
-| Every call fails after Blender restarts or updates | Extension disabled / bridge not auto-started | Re-enable **Agent MCP Bridge**, Start Server, then `reconnect()`. |
+| Every call fails after Blender restarts or updates | Extension disabled / bridge not auto-started | Re-enable **Blend for me**, Start Server, then `reconnect()`. |
 | `health()` returns `connected: true` but the scene looks wrong | You are talking to a *different* Blender instance | `get_scene_info()` and `get_blender_version()`; confirm the filepath with the user. |
 
 ---
@@ -93,7 +93,7 @@ Give the user this, verbatim, and do not improvise workarounds — nothing works
 without the bridge:
 
 1. Open the Blender **desktop app** (not `blender --background`).
-2. Edit ▸ Preferences ▸ Add-ons — enable **Agent MCP Bridge**.
+2. Edit ▸ Preferences ▸ Add-ons — enable **Blend for me**.
 3. In the 3D Viewport press **N** ▸ **Agent MCP** tab ▸ **Start Server**.
 4. Confirm the port reads **9876**.
 

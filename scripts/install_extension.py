@@ -41,28 +41,68 @@ def run(cmd: list[str]) -> int:
     return proc.returncode
 
 
+import os
+import shutil
+
+
+def find_blender(custom_path: str | None = None) -> pathlib.Path:
+    """Find Blender binary path portably across macOS, Linux, and Windows."""
+    if custom_path:
+        p = pathlib.Path(custom_path)
+        if p.is_file():
+            return p
+        if p.is_dir() and (p / "Contents/MacOS/Blender").is_file():
+            return p / "Contents/MacOS/Blender"
+
+    env_blender = os.environ.get("BLENDER")
+    if env_blender:
+        p = pathlib.Path(env_blender)
+        if p.is_file():
+            return p
+
+    sh_blender = shutil.which("blender") or shutil.which("Blender")
+    if sh_blender:
+        return pathlib.Path(sh_blender)
+
+    candidates = [
+        pathlib.Path("/Applications/Blender.app/Contents/MacOS/Blender"),
+        pathlib.Path("/usr/bin/blender"),
+        pathlib.Path("/usr/local/bin/blender"),
+        pathlib.Path(os.path.expanduser("~/.local/bin/blender")),
+    ]
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    raise FileNotFoundError("Blender executable not found. Set BLENDER environment variable or pass --blender.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--zip", default=None)
-    parser.add_argument("--blender", default=DEFAULT_BLENDER)
+    parser.add_argument("--blender", default=None)
     parser.add_argument("--repo", default="user_default")
     args = parser.parse_args()
+
+    try:
+        blender_bin = find_blender(args.blender)
+    except FileNotFoundError as exc:
+        sys.exit(f"error: {exc}")
 
     zip_path = pathlib.Path(args.zip) if args.zip else newest_zip(REPO / "dist")
     if not zip_path.is_file():
         sys.exit(f"no such file: {zip_path}")
 
-    rc = run([args.blender, "--command", "extension", "validate", str(zip_path)])
+    rc = run([str(blender_bin), "--command", "extension", "validate", str(zip_path)])
     if rc != 0:
         sys.exit("manifest validation failed — fix blender_manifest.toml first")
 
-    rc = run([args.blender, "--command", "extension", "install-file",
+    rc = run([str(blender_bin), "--command", "extension", "install-file",
               "--repo", args.repo, "--enable", str(zip_path)])
     if rc != 0:
         sys.exit("install failed")
 
     print(f"\ninstalled + enabled {zip_path.name}")
-    print("Now open Blender, press N in the 3D Viewport, pick the 'Agent MCP' tab,")
+    print("Now open Blender, press N in the 3D Viewport, pick the 'Blend for me' tab,")
     print("and press Start Server.")
 
 

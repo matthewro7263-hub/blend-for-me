@@ -362,9 +362,23 @@ def fetch_page_markdown(url: str, max_chars: int = 12000) -> dict:
     cached = _cache_read(url, ".page", PAGE_TTL)
     if cached is None:
         try:
-            response = httpx.get(url, timeout=25.0, follow_redirects=True,
-                                 headers={"User-Agent": USER_AGENT})
-            response.raise_for_status()
+            curr_url = url
+            with httpx.Client(timeout=25.0, headers={"User-Agent": USER_AGENT}) as client:
+                for _ in range(5):
+                    parsed_curr = urlparse(curr_url)
+                    if parsed_curr.scheme not in ("http", "https"):
+                        raise ValueError(f"only http(s) URLs are supported, got {parsed_curr.scheme!r}")
+                    curr_host = (parsed_curr.hostname or "").lower()
+                    if curr_host not in ALLOWED_HOSTS:
+                        raise PermissionError(
+                            f"{curr_host!r} is not an allowed documentation host. Allowed: {sorted(ALLOWED_HOSTS)}"
+                        )
+                    response = client.get(curr_url, follow_redirects=False)
+                    if response.is_redirect and "location" in response.headers:
+                        curr_url = str(response.url.join(response.headers["location"]))
+                    else:
+                        break
+                response.raise_for_status()
         except httpx.HTTPError as exc:
             raise RuntimeError(f"could not fetch {url}: {exc}") from exc
         extractor = _Extractor()

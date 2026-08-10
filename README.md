@@ -1,94 +1,215 @@
-# blender-agent-mcp
+# Blend for me
 
-Deep, scriptable control of **Blender** for AI agents, over **MCP**.
+AI-directed Blender production through a local extension and an MCP server.
 
-Two halves of one system:
+**Blend for me** lets an AI agent inspect a Blender file, model and edit
+geometry, build materials, sculpt, rig, weight-paint, animate, arrange camera
+cuts, edit in the Video Sequencer, render, and verify the result with images.
+It is designed to expose real Blender operations as structured tools instead of
+forcing every task through one large Python script.
 
-| Part | What it is |
+> **Naming:** Blend for me is the public product name. The existing internal
+> identifiers remain `blender-agent-mcp` (Python package, executable, and Agent
+> Skill) and `blender_agent_mcp` (Blender extension ID). Keeping those IDs stable
+> avoids breaking installed extensions, MCP configurations, and tool references.
+
+## Status
+
+Blend for me is a capable **pre-release** project, not yet a finished public
+1.0. The current implementation has broad Blender coverage and a substantial
+test suite, but its protocol, failure-atomicity, GUI automation, packaging, and
+GitHub publication work still need hardening.
+
+Last locally verified on **August 9, 2026**:
+
+| Area | Verified baseline |
 | --- | --- |
-| `blender_extension/` | A Blender 4.2+ extension (developed and tested on **5.2 LTS**) that runs a loopback TCP bridge inside Blender and executes commands safely on the main thread. |
-| `mcp_server/` | A stdio MCP server (official `mcp` Python SDK) that any MCP client — Claude Code, Claude Desktop — connects to. It relays calls to the bridge. |
+| Blender | 5.2.0 LTS, Python 3.13.13 |
+| MCP server | Python 3.11+, official `mcp` SDK 2.x |
+| MCP catalog | 231 tools across 16 domains |
+| Blender bridge | 226 commands, including 22 GUI-only commands |
+| Unit and documentation tests | 64 passed |
+| Headless Blender smoke checks | 110 passed, 6 correctly GUI-gated, 0 failed |
+| API compatibility probe | Passed against the installed Blender 5.2 build |
+| Packages | MCP wheel/sdist and Blender extension ZIP built successfully |
 
-It covers objects, mesh editing, modifiers, **sculpting** (real brush strokes),
-**weight painting** (data-API first), rigging, shading, UV, animation, geometry
-nodes, import/export, and version-correct documentation search.
+These numbers describe that local snapshot, not every future commit. Run the
+verification commands in [Development and verification](#development-and-verification)
+before relying on a checkout or publishing a release.
 
----
+## What it can do
 
-## Requirements
+### Scene and object work
 
-* macOS 13 or newer (Apple Silicon primary; Intel supported)
-* **Blender ≥ 4.2**, installed at `/Applications/Blender.app`. Developed against **5.2 LTS**.
-* [`uv`](https://docs.astral.sh/uv/) — `brew install uv`
-* Python 3.11+ for the MCP server (uv fetches one if needed)
+- Inspect scenes, objects, collections, transforms, bounds, selections,
+  materials, modifiers, vertex groups, cameras, and lights.
+- Create mesh primitives, empties, cameras, lights, and collection hierarchies.
+- Transform, align, aim, frame, parent, join, separate, hide, and organize
+  objects.
+- Configure persistent render, output, color-management, unit, timeline, and
+  World settings.
+- Store pipeline metadata and rig controls as Blender custom properties.
 
-Blender's CLI, used by every make target and by headless tests:
+### Modeling, sculpting, UVs, and weights
 
-```bash
-/Applications/Blender.app/Contents/MacOS/Blender
+- Select and edit mesh geometry with BMesh-backed operations.
+- Extrude, inset, bevel, subdivide, fill, bridge, merge, symmetrize, recalculate
+  normals, triangulate, smooth, and decimate.
+- Add, configure, reorder, apply, and remove common modifiers.
+- Use Blender 5.2 sculpt brush assets, dyntopo, symmetry, voxel remesh,
+  Quadriflow, masks, face sets, filters, and real GUI brush strokes.
+- Create UV layers, mark seams, unwrap, smart-project, pack, and inspect UV
+  statistics.
+- Create and edit vertex groups, transfer and normalize weights, auto-weight a
+  rig, diagnose unweighted geometry, and capture a weight heatmap.
+
+### Materials, images, and procedural graphs
+
+- Create Principled materials and assign them to objects or selected faces.
+- Inspect and edit material node trees.
+- Build retry-safe shader graphs using caller-owned stable node IDs.
+- Build Color Ramps, frames, image texture nodes, links, and socket defaults.
+- Create, list, save, load, and pack image datablocks.
+- Bake common Cycles passes to internal images or external files.
+- Construct Geometry Nodes groups and drive modifier inputs.
+
+### Rigging, animation, and editorial
+
+- Create armatures and bones, pose rigs, add constraints and IK, bind meshes,
+  manage shape keys, drivers, and bone collections.
+- Insert individual or bulk keyframes for objects, pose bones, vector
+  components, visibility, and custom properties.
+- Inspect Blender 4.4+/5.x slotted-action F-Curves, edit interpolation, assign
+  actions, and push actions into the NLA.
+- Build named camera-cut plans from timeline markers.
+- Add image, movie, audio, text, and color strips to the Video Sequencer.
+- Render camera-cut animation or a sequencer edit to MP4 or PNG frames.
+
+### Agent understanding and verification
+
+- Introspect the live Blender Python API with `describe_api`.
+- Search version-correct Blender manual and Python API inventories.
+- Return actionable Blender tracebacks instead of swallowing failures.
+- Capture viewport screenshots and rendered frames for visual verification.
+- Expose command metadata including GUI requirements and undo intent.
+- Show an optional animated agent cursor and live terminal overlay in Blender.
+
+## How it works
+
+Blend for me has two runtime components:
+
+| Component | Responsibility |
+| --- | --- |
+| `blender_extension/` | Runs inside Blender, listens on loopback TCP, queues commands, and executes `bpy` work on Blender's main thread. |
+| `mcp_server/` | Runs as a stdio MCP server, exposes agent-friendly tools, and relays calls to the Blender extension. |
+
+```mermaid
+flowchart LR
+    A["AI agent / MCP client"] -->|"stdio MCP"| B["Blend for me MCP server"]
+    B -->|"JSON lines over 127.0.0.1"| C["Blender extension socket thread"]
+    C -->|"thread-safe queue"| D["Blender main-thread timer pump"]
+    D --> E["Validated handlers"]
+    D --> F["Optional activity overlay"]
+    E --> G["Scene, modeling, rigs, animation, VSE, files, and renders"]
 ```
 
----
+Blender's Python API is not thread-safe. Socket threads only parse requests and
+enqueue work. A `bpy.app.timers` callback drains that queue and executes every
+handler on Blender's main thread.
 
-## Install
+The bridge binds to `127.0.0.1` by default. It is not intended to be exposed to
+another machine.
 
-### 1. Build the extension
+## Requirements and compatibility
+
+- macOS 13 or newer is the current development environment.
+- Blender 5.2 LTS is the verified target.
+- The extension manifest currently declares Blender 4.2 as its minimum, but a
+  complete 4.2-through-5.2 compatibility matrix has **not** been run. Treat 5.2
+  as the supported public baseline until older versions are tested.
+- Python 3.11 or newer for the MCP server.
+- [`uv`](https://docs.astral.sh/uv/) for dependency and environment management.
+- Blender is currently expected at
+  `/Applications/Blender.app/Contents/MacOS/Blender` unless `BLENDER` or an
+  explicit script argument supplies another path.
+
+Linux and Windows support are not yet release-verified. Most MCP-side code is
+portable, but the current build defaults, Metal setup, and the `run_terminal`
+string-command path are macOS-oriented.
+
+## Quick start
+
+### 1. Get the repository and verify dependencies
+
+```bash
+git clone <FINAL_REPOSITORY_URL>
+cd <REPOSITORY_DIRECTORY>
+uv sync --directory mcp_server --extra dev
+```
+
+The final public repository URL has not been chosen yet; do not publish the
+placeholder above as a real install command.
+
+### 2. Build the Blender extension
 
 ```bash
 make build-ext
 ```
 
-This writes `dist/blender_agent_mcp-<version>.zip`. It uses Blender's own
-`--command extension build`, so the manifest is validated exactly as the
-installer will validate it.
+The artifact is written to:
 
-### 2. Install it into Blender
-
-Either through the UI:
-
-1. **Blender ▸ Edit ▸ Preferences ▸ Get Extensions**
-2. The **▾** menu (top right) ▸ **Install from Disk…**
-3. Pick `dist/blender_agent_mcp-<version>.zip`
-4. Approve the **network** and **files** permissions when prompted
-5. Make sure the add-on's checkbox is ticked
-
-…or from the command line:
-
-```bash
-make install-ext
+```text
+dist/blender_agent_mcp-<version>.zip
 ```
 
-### 3. Start the bridge
+When Blender is available, the builder uses Blender's extension build command
+and validates the archive layout.
 
-In the 3D Viewport press **N** ▸ **Agent MCP** tab ▸ **Start Server**.
+### 3. Install the extension in Blender
 
-The panel shows connection state, the port, an autostart-on-file-load toggle, and
-the last 20 commands with their durations. The bridge binds **127.0.0.1 only** and
-is never reachable from another machine.
+Use Blender's UI for the reliable current path:
 
-### 4. Register the MCP server
+1. Open **Blender → Edit → Preferences → Get Extensions**.
+2. Open the menu in the top-right corner.
+3. Choose **Install from Disk…**.
+4. Select `dist/blender_agent_mcp-<version>.zip`.
+5. Approve the requested network and file permissions.
+6. Make sure **Blend for me** is enabled.
 
-**Claude Code** — from anywhere:
+The scripted `make install-ext` target is still being hardened and should not be
+treated as the public installation path yet.
+
+### 4. Start the Blender bridge
+
+In a 3D Viewport:
+
+1. Press **N** to open the sidebar.
+2. Open the **Agent MCP** tab.
+3. Press **Start Server**.
+
+The default port is `9876`. A different port can be selected in the panel or
+set with `BLENDER_AGENT_PORT`. Blender and the MCP server must use the same
+port.
+
+### 5. Register the MCP server
+
+Any MCP client that can launch a stdio server can run:
 
 ```bash
-claude mcp add blender-agent -- uv run --directory /ABSOLUTE/PATH/TO/blender-agent-mcp/mcp_server blender-agent-mcp
+uv run --directory "/ABSOLUTE/PATH/TO/REPOSITORY/mcp_server" blender-agent-mcp
 ```
 
-Add `-s user` to make it available in every project instead of just this one.
-Verify with `claude mcp list` — it should report `✔ Connected`.
-
-**Claude Desktop** — edit
-`~/Library/Application Support/Claude/claude_desktop_config.json`:
+A generic MCP configuration looks like:
 
 ```json
 {
   "mcpServers": {
-    "blender-agent": {
+    "blend-for-me": {
       "command": "uv",
       "args": [
         "run",
         "--directory",
-        "/ABSOLUTE/PATH/TO/blender-agent-mcp/mcp_server",
+        "/ABSOLUTE/PATH/TO/REPOSITORY/mcp_server",
         "blender-agent-mcp"
       ]
     }
@@ -96,299 +217,320 @@ Verify with `claude mcp list` — it should report `✔ Connected`.
 }
 ```
 
-Restart Claude Desktop afterwards. Use absolute paths in both cases — the server
-is launched with an unpredictable working directory.
+Use absolute paths because desktop clients may launch the server from an
+unpredictable working directory.
 
----
+For Claude Code, the equivalent registration is:
 
-## Try it
-
-With Blender open and the bridge started, ask your agent:
-
-> Show me the scene, then add a UV sphere, voxel remesh it at 0.03, and take a screenshot.
-
-A good first health check is the `health` tool: it reports whether the bridge is
-reachable, which Blender is on the other end, and whether a 3D Viewport exists.
-
----
-
-## Architecture
-
-```
-MCP client ──stdio──▶ mcp_server ──TCP 127.0.0.1:9876──▶ Blender extension
-                                   JSON lines               │
-                                                            ▼
-                                              socket thread (no bpy!)
-                                                            │  queue
-                                                            ▼
-                                              bpy.app.timers pump  ← main thread
-                                                            │
-                                                            ▼
-                                                    handlers/*.py
+```bash
+claude mcp add blend-for-me -- uv run --directory "/ABSOLUTE/PATH/TO/REPOSITORY/mcp_server" blender-agent-mcp
 ```
 
-`bpy` is not thread-safe. The socket threads only parse JSON and enqueue work; a
-`bpy.app.timers` callback drains that queue on Blender's main thread and hands
-results back. Nothing touches Blender state off the main thread.
+Client configuration formats change independently of this project. Verify a
+client's current official documentation before publishing more client-specific
+examples.
 
-### Visible agent presence
+### 6. Check the connection
 
-GUI Blender shows what the connected agent is doing instead of leaving its work
-invisible:
+Ask the agent to call `health`, then `get_scene_info`.
 
-- The supplied upward cursor SVG is rendered as a crisp Blender GPU overlay in
-  the relevant editor: shader/geometry/compositor nodes, UV/Image Editor,
-  animation editors, Video Sequencer, or the 3D Viewport fallback.
-- The cursor rests with a gentle left tilt and idle wiggle. During travel it
-  rotates its tip into the direction of motion, follows a damped spring path,
-  and smoothly settles back into its tilted pose at the destination.
-- Retry-safe shader graph builds move the cursor after each real node mutation,
-  so node construction is visible while it happens. Custom Python graph loops
-  can call `agent_activity.step("Blur", [x, y])` for the same behavior.
-- `execute_python` sends the cursor off the editor's right edge, then has it drag
-  a macOS-style **Agent Terminal** into the center. The command types in before
-  streaming stdout/stderr; the cursor waits outside the lower-right corner,
-  clicks the red control on completion, and carries on as the window closes.
-- Python gets a `run_terminal(command, cwd=None, timeout=120, check=True)` helper.
-  It streams a zsh command string—or an argv list without a shell—into that
-  terminal as it runs.
+A useful first request is:
+
+> Inspect the current scene. Tell me which object and camera are active, then
+> create a UV sphere, voxel-remesh it at 0.03, and take a viewport screenshot.
+
+## Recommended agent workflow
+
+Reliable Blender automation should be iterative:
+
+1. **Connect:** call `health` and inspect bridge capabilities.
+2. **Observe:** call `get_scene_info` and inspect the exact objects involved.
+3. **Plan:** choose dedicated tools and identify destructive or expensive work.
+4. **Checkpoint:** create an undo checkpoint before topology, rig, or file
+   operations.
+5. **Act:** make small, structured changes with exact object names.
+6. **Verify:** re-read state and capture a screenshot, heatmap, or render.
+7. **Save deliberately:** report the destination before writing or overwriting
+   an external file.
+
+Prefer dedicated tools over `execute_python`. The escape hatch is valuable for
+novel Blender work, but dedicated tools provide better validation, structured
+results, and documentation.
+
+## Tool domains
+
+The generated catalog is the source of truth for exact names and parameters.
+
+| Domain | Main capabilities |
+| --- | --- |
+| `core` | Health, versions, scene inspection, modes, undo/redo, Python execution, live API inspection, screenshots, still renders |
+| `objects` | Primitives, empties, cameras, lights, transforms, parenting, collections, visibility, selection, alignment |
+| `mesh` | Mesh selection and topology operations, normals, smoothing, triangulation, decimation |
+| `modifiers` | Generic and specialized modifier creation, settings, order, application, and removal |
+| `sculpt` | Brush assets, strokes, symmetry, dyntopo, remeshing, masks, face sets, filters |
+| `weights` | Vertex groups, automatic and manual weights, transfer, cleanup, diagnostics, heatmap |
+| `rig` | Armatures, bones, poses, constraints, IK, binding, shape keys, drivers, bone collections |
+| `shading` | Materials, shader graphs, images, textures, viewport shading, baking |
+| `uv` | UV layers, seams, unwrap, smart project, packing, diagnostics |
+| `anim` | Timeline, keyframes, interpolation, actions, NLA, playblast |
+| `cinematics` | Camera cuts, markers, Video Sequencer strips, final animation rendering |
+| `geonodes` | Geometry Nodes groups, sockets, nodes, links, modifiers, inputs |
+| `settings` | Render/output settings, color management, units, World background |
+| `properties` | Persistent custom Blender ID properties and UI metadata |
+| `io` | Model import/export and blend save/open/list/append operations |
+| `docs` | Blender manual/API search, page extraction, tutorials, local cache |
+
+To inspect the current installed bridge rather than assuming it matches this
+checkout, call `list_bridge_commands`.
+
+## What requires GUI Blender
+
+Commands that need an actual `VIEW_3D` area refuse safely under
+`blender --background`. They include:
+
+- viewport screenshots and viewport shading changes;
+- playblasts;
+- sculpt brush strokes and gestures;
+- weight gradients and weight heatmaps;
+- mask and face-set gestures.
+
+Most data-API operations—objects, mesh data, modifiers, rigging, materials, UVs,
+animation, settings, properties, and import/export—also run in headless Blender.
+
+`list_bridge_commands` reports `needs_gui` for each command.
+
+## Visible agent activity
+
+In GUI Blender, Blend for me can show what the agent is doing:
+
+- a GPU-rendered cursor appears over the editor related to the command;
+- shader graph builds can move the cursor between real node mutations;
+- `execute_python` can display a small live Agent Terminal overlay;
+- `agent_activity.step(label, [x, y])` exposes progress from custom graph code;
+- `run_terminal(command, cwd=None, timeout=120, check=True)` streams an external
+  command's output into the overlay;
+- the N-panel contains visibility, cursor, terminal, scale, timing, and preview
+  controls.
+
+The overlay is optional, disabled safely in headless mode, and isolated so a UI
+failure does not prevent the Blender command from running.
+
+The current string form of `run_terminal` uses zsh. An argv list avoids shell
+interpretation and is the preferred form:
 
 ```python
 execute_python(
-    code="run_terminal('python3 -u render_preview.py', cwd='/path/to/show')",
+    code="run_terminal(['python3', '-u', 'render_preview.py'], cwd='/path/to/show')",
     timeout=180,
 )
 ```
 
-The **Agent MCP** N-panel has toggles for the cursor, terminal, overlay scale and
-pre-close pause, plus a **Preview** button. Overlays are disabled safely in
-headless Blender. Commands an agent runs completely outside this MCP bridge
-cannot be observed; use `run_terminal` when their live output should appear in
-Blender.
+## Agent Skill
 
-### Wire protocol
+The repository includes an Agent Skill at:
 
-JSON, one object per line, over TCP.
-
-```jsonc
-// request
-{"id": "7", "cmd": "objects.create_primitive", "params": {"kind": "CUBE"}}
-// success
-{"id": "7", "ok": true,  "result": {"name": "Cube"}}
-// failure — the agent always learns why
-{"id": "7", "ok": false, "error": "KeyError: 'Sphere'", "traceback": "Traceback ..."}
+```text
+skills/blender-agent-mcp/
 ```
 
-* Default budget **10 s** per command; slow tools (remesh, quadriflow, render,
-  playblast) raise it per call.
-* Images come back as `{"png_b64": ..., "width": ..., "height": ...}` and are
-  turned into real MCP image content blocks, so agents can see them.
-* Built-in commands: `ping`, `get_version`, `list_commands`, `shutdown`.
+It teaches session startup, the observe–act–verify loop, tool selection,
+sculpting, weight painting, rigging, animation, recipes, and troubleshooting.
+The skill retains its internal name so existing installations continue to work.
 
-### Port
-
-Default **9876**. Change it in the N-panel, or override everything with the
-`BLENDER_AGENT_PORT` environment variable (it must be set for *both* Blender and
-the MCP server).
-
----
-
-## What needs GUI Blender
-
-Anything that needs a real `VIEW_3D` area cannot work under `blender --background`:
-
-* `viewport_screenshot`, `playblast`, `set_viewport_shading`
-* all `sculpt_stroke*` / `stroke_*` / `radial_strokes` tools
-* `weight_gradient`, `weight_heatmap`
-* mask and face-set *gesture* tools
-
-These report an actionable error rather than a confusing OpenGL failure. Every
-other tool — objects, mesh, modifiers, weights via the data API, rigging,
-shading, UV, animation, import/export — works headless.
-
-`list_bridge_commands` reports `needs_gui` per command, so an agent can check
-before it commits to an approach.
-
----
-
-## Tool catalog
-
-231 tools across these modules. Every tool carries a docstring covering
-what it does, when to use it instead of an alternative, parameter units, and its
-gotchas — that documentation is the interface agents actually read.
-
-| Module | Covers |
-| --- | --- |
-| `core` | health, versions, scene/object introspection, modes, undo/redo, `execute_python`, `describe_api`, screenshots, renders |
-| `objects` | primitives, empties/cameras/lights, transforms, parenting, collections, join/separate, selection, align & snap |
-| `mesh` | bmesh-backed select/extrude/inset/bevel/subdivide/merge/fill/bridge/symmetrize/normals/shading/triangulate/decimate |
-| `modifiers` | generic add/list/set/apply/remove/reorder plus subsurf, mirror, solidify, boolean, shrinkwrap, armature, multires, remesh, data transfer |
-| `sculpt` | brushes (asset-based), symmetry, real brush strokes, dyntopo, voxel/quadriflow remesh, masks, face sets, mesh filters |
-| `weights` | vertex groups, bulk weight read/write, auto weights, normalize/mirror/smooth/clean/quantize/limit, gradient, transfer, diagnostics, heatmap |
-| `rig` | armature creation, edit/pose bones, constraints, IK setup, mesh parenting, shape keys, drivers, bone collections |
-| `shading` | PBR materials, retry-safe batch node graphs, Color Ramps, generated/custom image textures, viewport shading, baking |
-| `uv` | seams, unwrap, smart project, pack islands, UV stats |
-| `anim` | frames, fps, single/bulk object, bone and custom-property keys, interpolation, actions, NLA, playblast |
-| `cinematics` | shot markers and camera cuts, Video Sequencer image/movie/audio/text/color editing, final MP4/PNG animation renders |
-| `geonodes` | geometry-nodes modifier and node-group construction |
-| `settings` | persistent render/output, color management, units and World lighting |
-| `properties` | custom ID properties for metadata, rig controls and driver inputs |
-| `io` | OBJ / FBX / glTF / USD / STL / PLY / Alembic import & export, blend save/open/append |
-| `docs` | manual + Python API search via intersphinx, page fetch, tutorial search, caching |
-
-### Two ways to ask "how does this work?"
-
-* **`describe_api("bpy.ops.sculpt.brush_stroke")`** — live RNA introspection of the
-  *running* Blender. Exact parameter names, enums and defaults; never stale.
-* **`search_blender_manual(...)` / `search_python_api(...)` / `get_doc_page(...)`** —
-  prose, concepts and version-correct deep links, from the official Sphinx
-  inventories.
-
-Use the first for signatures, the second for understanding.
-
----
-
-## The Agent Skill
-
-The repo ships an [Agent Skill](https://code.claude.com/docs/en/skills) at
-[`skills/blender-agent-mcp/`](skills/blender-agent-mcp/) that teaches an agent
-how to *use* these tools well — session-start protocol, the observe-act-verify
-loop, tool-selection decision tables, and deep references on sculpting, weight
-painting, rigging and troubleshooting.
-
-Registering the MCP server gives an agent the tools; installing the skill gives
-it the judgement to sequence them.
-
-### Install it
-
-Skills load from a `skills/<skill-name>/SKILL.md` directory. Pick a scope:
+Project-local installation:
 
 ```bash
-# This project only — everyone who clones the repo gets it
-mkdir -p .claude/skills && ln -s ../../skills/blender-agent-mcp .claude/skills/blender-agent-mcp
+mkdir -p .claude/skills
+ln -s ../../skills/blender-agent-mcp .claude/skills/blender-agent-mcp
 ```
+
+Personal installation:
 
 ```bash
-# All your projects
-mkdir -p ~/.claude/skills && cp -R skills/blender-agent-mcp ~/.claude/skills/
+mkdir -p ~/.claude/skills
+cp -R skills/blender-agent-mcp ~/.claude/skills/
 ```
 
-| Scope | Path |
-| --- | --- |
-| Personal | `~/.claude/skills/blender-agent-mcp/SKILL.md` |
-| Project | `.claude/skills/blender-agent-mcp/SKILL.md` |
-| Plugin | `<plugin>/skills/blender-agent-mcp/SKILL.md` |
-
-A symlink keeps the project copy in sync with the repo; `cp -R` does not.
-Confirm it loaded by typing `/blender-agent-mcp` — Claude also invokes it on its
-own whenever a request involves Blender.
-
-### Regenerate the inventory after adding tools
-
-`references/_tool_inventory.json` is generated from the live MCP server and is
-what the documentation tests check against. After adding or changing any tool:
+After changing MCP tools, regenerate and verify the catalog:
 
 ```bash
 make skill-inventory
+make skill-check
 ```
 
-Then update `references/tool-reference.md` to match and run `make test`. The
-tests fail if a tool exists but is undocumented, if a documented tool does not
-exist, if any parameter list has drifted, or if a GUI-only tool is not flagged.
+The documentation tests compare tool names, parameters, required fields, GUI
+flags, and skill references against the live MCP catalog.
 
-## Development
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `blender_extension/` | Installable Blender extension, bridge, registry, activity overlay, and Blender handlers |
+| `mcp_server/` | Python stdio MCP server and agent-facing tool wrappers |
+| `skills/blender-agent-mcp/` | Agent operating guide, recipes, generated catalog, and deep references |
+| `tests/` | Unit tests, protocol tests, documentation checks, headless Blender smoke suite, and GUI demo harness |
+| `scripts/` | Extension builder, installer, Blender API probe, and support scripts |
+| `docs/BLENDER_5X_API_NOTES.md` | Live-verified Blender 5.x API behavior and migration traps |
+| `Blend for me.md` | Product brief, verified implementation map, production roadmap, and publication checklist |
+
+## Development and verification
+
+Set a custom Blender executable when necessary:
 
 ```bash
-make build-ext     # build dist/*.zip (validated by Blender itself)
-make install-ext   # build + install + enable in Blender
-make run-server    # run the MCP server on stdio
-make test          # unit tests + headless integration smoke
-make smoke         # headless integration only
-make demo          # GUI acceptance demo (needs Blender + bridge running)
-make probe         # re-verify every documented API assumption
+make BLENDER="/path/to/blender" probe
 ```
 
-### After upgrading Blender
+Core commands:
 
-Run `make probe` first. It checks every assumption recorded in
-[`docs/BLENDER_5X_API_NOTES.md`](docs/BLENDER_5X_API_NOTES.md) against the new
-build and exits non-zero when one breaks — including "an operator we work around
-because it was removed has come back", so workarounds can be retired.
+```bash
+make test-unit      # Python unit and documentation tests
+make smoke          # real Blender headless smoke checks
+make test           # unit tests followed by headless Blender smoke checks
+make probe          # verify recorded Blender/MCP API assumptions
+make skill-check    # fail when the generated Agent Skill inventory is stale
+make build-ext      # build and validate the Blender extension ZIP
+make run-server     # run the MCP server over stdio
+```
 
-That notes file exists because several APIs changed in ways that break code
-written from memory. A few that bite hardest on 5.2:
+Run the activity UI in a disposable Blender window directly:
 
-* `mcp.server.fastmcp` was **removed** in mcp SDK 2.0 — the class is `MCPServer`.
-* `Brush.sculpt_tool` **no longer exists**; brushes are assets activated by
-  identifier, and their real names are `Inflate/Deflate`, `Scrape/Fill`,
-  `Crease Sharp`… not the friendly names in most tutorials.
-* `paint.brush_select` and `object.vertex_group_transfer_weight` were removed.
-* `wm.fbx_import` exists but `wm.fbx_export` does not.
-* Manifest permission reasons are capped at **64 characters**.
+```bash
+"/Applications/Blender.app/Contents/MacOS/Blender" \
+  --factory-startup --python tests/gui_activity_demo.py
+```
 
----
+The current `make demo` target still references an obsolete filename, and the
+current `make install-ext` path needs an argument-handling fix. They should be
+repaired before being used as release gates.
+
+After upgrading Blender, run `make probe` before changing compatibility claims.
+The probe exists because multiple Blender 5.x APIs differ from older examples,
+including sculpt brush assets, slotted actions, Geometry Nodes modifier inputs,
+Video Sequencer collections, and import/export operator names.
+
+## Known pre-release limitations
+
+- Only Blender 5.2 has been exercised as the complete local target.
+- The loopback bridge currently has no pairing token or authentication.
+- The bridge has an initial protocol-version handshake, but the client still
+  permits a legacy fallback when it times out or is unavailable. Peer identity,
+  strict version enforcement, and authenticated pairing are not complete.
+- A connection failure after sending a command can make a mutating retry
+  ambiguous; do not blindly retry destructive work after a timeout.
+- An undo step is not the same as automatic transactional rollback. Some
+  multi-stage Blender operations still need stronger failure atomicity.
+- Some image-returning MCP tools currently drop useful non-image diagnostics.
+- The convenience Cycles selection path needs clean-factory hardening; verify the
+  scene engine and a small proof render before starting an expensive job.
+- Headless tests verify GUI-only commands refuse safely, but full automated GUI
+  behavior coverage is not complete.
+- Dedicated texture-paint, compositor graph, World graph, simulation, richer
+  F-Curve/NLA, and advanced VSE workflows are still roadmap items.
+- Long Blender operations are synchronous and do not yet have durable job IDs,
+  progress, cancellation, or reconnectable status.
+
+See [`Blend for me.md`](Blend%20for%20me.md) for the larger implementation and
+production roadmap.
 
 ## Troubleshooting
 
-**"Could not reach Blender on 127.0.0.1:9876"**
-Blender must be *running with the bridge started*: N-panel ▸ Agent MCP ▸ Start
-Server. Check the port matches. Then call `reconnect`.
+### The MCP server cannot reach Blender
 
-**"Port 9876 is already in use"**
-Something else holds it — often a previous Blender that did not shut down
-cleanly. Find it with `lsof -nP -iTCP:9876 -sTCP:LISTEN`, or just pick another
-port in the panel and set `BLENDER_AGENT_PORT` to match for the MCP server.
+Confirm that:
 
-**Port 9876 collides with Blender's own MCP add-on.** Blender Lab's official
-`mcp` extension also defaults to `DEFAULT_PORT = 9876`. If both are installed
-and started, whichever starts first wins and the other fails to bind. Worse, the
-MCP server will happily connect to the *other* server and then time out, which
-reads like "Blender is not responding" rather than "wrong server". If `health`
-connects but every command times out, check which add-on owns the port:
+1. Blender is running normally, not only as a background process.
+2. **Blend for me** is enabled.
+3. The N-panel shows that the bridge is started.
+4. Blender and the MCP server use the same port.
+5. The MCP client uses an absolute path to `mcp_server/`.
+
+Then call `reconnect` and `health`.
+
+### Port 9876 is already in use
+
+Another process or Blender MCP extension may already own the default port.
 
 ```bash
 lsof -nP -iTCP:9876 -sTCP:LISTEN
 ```
 
-Then either stop the other server, or move this bridge to another port in the
-N-panel and set `BLENDER_AGENT_PORT` to match for the MCP server.
+Stop the other listener or choose a different port in the Blender panel and set
+the same `BLENDER_AGENT_PORT` for the MCP server.
 
-**macOS firewall prompt on first start**
-macOS may ask whether Blender should accept incoming connections. Allowing it is
-safe — the bridge binds loopback only, so nothing off this machine can reach it.
-Denying it does not break loopback connections either.
+Because the current protocol has no identity handshake, connecting to a
+different service on the same port may look like a timeout rather than an
+immediate wrong-server error.
 
-**Extension disabled after a Blender update**
-Blender may disable extensions built for an older version. Re-tick it in
-Preferences ▸ Add-ons, or `make install-ext` again.
+### A tool exists in the MCP server but Blender says “unknown command”
 
-**A tool says it needs a 3D Viewport**
-You are on headless Blender, or no VIEW_3D area is open. See
-[What needs GUI Blender](#what-needs-gui-blender).
+The installed Blender extension is a built ZIP, not a live import of this source
+checkout. Rebuild the extension, reinstall the new ZIP, and restart the bridge.
+Save the current Blender file first.
 
-**Commands time out**
-The default budget is 10 s. Remeshing, quadriflow, Cycles renders and playblasts
-take longer — pass a bigger `timeout`. If *everything* times out, Blender's main
-thread is blocked (a modal operator, an open file dialog, or a render in
-progress); dismiss it in the UI.
+Use `list_bridge_commands` before a session that depends on newly added tools.
 
-**`claude mcp list` shows the server failing**
-Run the command by hand to see the real error:
-`uv run --directory /ABS/PATH/mcp_server blender-agent-mcp`.
+### A tool says it needs a 3D Viewport
 
----
+Run Blender with its GUI and keep a `VIEW_3D` area open. Data-API alternatives
+can still work headlessly.
 
-## Safety notes
+### A command times out
 
-* The bridge binds **loopback only** and has no authentication — anything already
-  running as your user on this machine can drive Blender through it. Stop the
-  server when you are not using it.
-* `execute_python` runs arbitrary code inside Blender with your privileges. Its
-  `run_terminal` helper can also run local shell commands. They are deliberate
-  escape hatches; prefer the specific tool when one exists.
-* Destructive file operations (`open_blend`, overwriting with `save_blend`)
-  refuse unless called with `confirm: true`.
+Rendering, remeshing, baking, Quadriflow, and playblasts can take much longer
+than the default command budget. Use the tool's `timeout` parameter when it has
+one. Do not immediately repeat a mutating command after an ambiguous timeout;
+inspect the scene first.
+
+If every command times out, Blender's main thread may be held by a modal
+operator, render, or open dialog.
+
+### The MCP process fails before connecting
+
+Run its command directly to expose dependency or path errors:
+
+```bash
+uv run --directory "/ABSOLUTE/PATH/TO/REPOSITORY/mcp_server" blender-agent-mcp
+```
+
+## Security and safety
+
+- The bridge listens on loopback by default, but it currently has no
+  authentication. Any local process running as the same user can attempt to
+  drive it. Stop the bridge when it is not needed.
+- Never expose port 9876 to a LAN or the public internet.
+- `execute_python` runs arbitrary Python inside Blender with the user's
+  privileges.
+- `run_terminal` can launch local processes and shell commands.
+- Import, export, render, bake, image save, and blend-file tools can write files.
+- Opening another blend can discard unsaved changes and therefore requires
+  explicit confirmation.
+- Prefer dedicated tools, exact object names, small changes, checkpoints, and
+  verification renders.
+- Back up important `.blend` files before testing pre-release automation.
+
+## GitHub publication checklist
+
+Before making the repository public:
+
+- choose the final repository URL and maintainer identity;
+- replace placeholder metadata in `blender_extension/blender_manifest.toml` and
+  the documentation;
+- add the complete root GPL-3.0-or-later `LICENSE` file;
+- remove local `.claude` memory/settings from public tracking and address their
+  presence in Git history;
+- verify the provenance and redistribution rights of every SVG, image, and
+  `.blend` fixture;
+- add CI, contribution, code-of-conduct, security, support, and changelog files;
+- repair and test scripted installation and GUI demo targets;
+- decide whether the first public compatibility baseline is Blender 5.2 or run
+  the promised older-version matrix;
+- run the full verification suite from the release commit;
+- build and validate the extension ZIP, wheel, and sdist;
+- attach checksums and publish only reviewed artifacts.
 
 ## License
 
-GPL-3.0-or-later, matching Blender's Python API.
+The extension manifest and Python package metadata declare
+**GPL-3.0-or-later**, matching Blender Python API requirements. A complete root
+`LICENSE` file still needs to be added before public release.

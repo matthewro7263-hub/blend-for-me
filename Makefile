@@ -1,4 +1,15 @@
-BLENDER ?= /Applications/Blender.app/Contents/MacOS/Blender
+ifeq ($(OS),Windows_NT)
+    DEFAULT_BLENDER := C:/Program Files/Blender Foundation/Blender 5.2/blender.exe
+else
+    UNAME_S := $(shell uname -s)
+    ifeq ($(UNAME_S),Darwin)
+        DEFAULT_BLENDER := /Applications/Blender.app/Contents/MacOS/Blender
+    else
+        DEFAULT_BLENDER := $(shell which blender 2>/dev/null || echo /usr/bin/blender)
+    endif
+endif
+
+BLENDER ?= $(DEFAULT_BLENDER)
 PORT    ?= 9876
 TESTPORT?= 9899
 REPO    := $(shell pwd)
@@ -20,7 +31,7 @@ build-ext:
 	python3 scripts/build_extension.py
 
 install-ext: build-ext
-	$(BLENDER) --background --factory-startup --python scripts/install_extension.py
+	python3 scripts/install_extension.py --blender "$(BLENDER)"
 
 run-server:
 	uv run --directory mcp_server blender-agent-mcp
@@ -34,7 +45,7 @@ smoke:
 test: test-unit smoke
 
 demo:
-	cd mcp_server && uv run python ../tests/gui_demo.py
+	$(BLENDER) --python tests/gui_activity_demo.py
 
 probe:
 	$(BLENDER) --background --factory-startup --python scripts/probe_api.py

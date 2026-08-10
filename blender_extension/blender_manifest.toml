@@ -2,7 +2,7 @@ schema_version = "1.0.0"
 
 id = "blender_agent_mcp"
 version = "0.0.1-beta"
-name = "Blender for me"
+name = "Blend for me"
 tagline = "Local TCP bridge that lets AI agents drive Blender over MCP"
 maintainer = "blender-agent-mcp contributors <noreply@example.com>"
 type = "add-on"
@@ -14,7 +14,7 @@ tags = ["Development", "Pipeline"]
 blender_version_min = "4.2.0"
 
 license = [
-  "SPDX:GPL-3.0-or-later",
+  "SPDX:CC-BY-NC-SA-4.0",
 ]
 
 # Reasons are shown to the user at install time. Blender enforces a hard limit of

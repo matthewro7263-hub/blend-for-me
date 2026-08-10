@@ -294,9 +294,27 @@ def _run_terminal(
         raise subprocess.CalledProcessError(returncode, command)
     return result
 
-@command("execute_python", mutates=True)
+def is_execute_python_allowed() -> bool:
+    env_val = os.environ.get("BLENDER_AGENT_ALLOW_EXECUTE_PYTHON")
+    if env_val is not None:
+        return env_val.strip() == "1"
+    return True
+
+
+@command(
+    "execute_python",
+    mutates=True,
+    process_execution=True,
+    destructive=True,
+)
 def execute_python(params: dict) -> dict:
     """Run Python with live output, ``agent_activity`` and ``run_terminal`` helpers."""
+    if not is_execute_python_allowed():
+        raise PermissionError(
+            "execute_python is disabled by policy. Set BLENDER_AGENT_ALLOW_EXECUTE_PYTHON=1 "
+            "to enable Python execution."
+        )
+
     code = params["code"]
     globals_ns = {
         "bpy": bpy,
