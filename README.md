@@ -39,6 +39,9 @@ before relying on a checkout or publishing a release.
 
 ## What it can do
 
+<img width="1920" height="1080" alt="school_hallway_1080p" src="https://github.com/user-attachments/assets/6b6b43a9-72ae-49dc-b1a3-e30d6c617d3b" />
+Heres an example of what could be done, this is a school hallway i prompted claude code or opus 5 extra high to model and composite and texture.
+
 ### Scene and object work
 
 - Inspect scenes, objects, collections, transforms, bounds, selections,
